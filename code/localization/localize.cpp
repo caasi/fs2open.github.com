@@ -209,10 +209,15 @@ static SCP_string voice_language_display(int value)
 	if (value < 0) {
 		return XSTR("Original voice", 1943);
 	}
+	// the tag tells apart languages whose names a player may not know apart, such as zh-TW and zh-HK
+	if (*Lcl_languages[value].lang_bcp47 != '\0') {
+		return language_display(value) + " [" + Lcl_languages[value].lang_bcp47 + "]";
+	}
 	return language_display(value);
 }
 
-// -voice_language and $Voice language: take a language name, "same-as-text" or "original"
+// -voice_language and $Voice language: take a language name, a BCP 47 tag (+BCP47: in strings.tbl), "same-as-text"
+// or "original"
 static std::optional<int> voice_language_from_name(const SCP_string& name)
 {
 	if (!stricmp(name.c_str(), "original")) {
@@ -222,11 +227,21 @@ static std::optional<int> voice_language_from_name(const SCP_string& name)
 		return LCL_VOICE_TEXT_LANGUAGE;
 	}
 
+	// a name wins over a tag, so that a value that is the name of one language and the tag of another keeps meaning
+	// that name, as it did before languages had tags
 	int lang = lcl_find_lang_index_by_name(name);
-	if (lang < 0) {
-		return std::nullopt;
+	if (lang >= 0) {
+		return lang;
 	}
-	return lang;
+
+	// BCP 47 tags are case-insensitive.  The callers never pass an empty value, which would match a language
+	// without a tag.
+	for (int i = 0; i < static_cast<int>(Lcl_languages.size()); i++) {
+		if (!stricmp(Lcl_languages[i].lang_bcp47, name.c_str())) {
+			return i;
+		}
+	}
+	return std::nullopt;
 }
 
 // the mod default from $Voice language:, which the option also shows and uses while the player has not chosen
@@ -503,6 +518,15 @@ void parse_stringstbl_quick(const char *filename)
 				required_string("+Extension:");
 				stuff_string(language.lang_ext, F_RAW, LCL_LANG_NAME_LEN + 1);
 
+				// optional_string() only looks at the next token, so the lines must come in this order: $Language:,
+				// +XSTR:, +Extension:, +BCP47:, +Special Character Index:.  "language" is reused for every entry and is
+				// not initialized, so clear the tag when the line is missing.
+				if (optional_string("+BCP47:")) {
+					stuff_string(language.lang_bcp47, F_RAW, LCL_BCP47_LEN + 1);
+				} else {
+					language.lang_bcp47[0] = '\0';
+				}
+
 				if (!Unicode_text_mode) {
 					required_string("+Special Character Index:");
 					ubyte special_char;
@@ -554,6 +578,7 @@ void parse_stringstbl_quick(const char *filename)
 				for (i = 0; i < (int)Lcl_languages.size(); i++) {
 					if (!strcmp(Lcl_languages[i].lang_name, language.lang_name)) {
 						strcpy_s(Lcl_languages[i].lang_ext, language.lang_ext);
+						strcpy_s(Lcl_languages[i].lang_bcp47, language.lang_bcp47);
 						Lcl_languages[i].special_char_indexes[0] = language.special_char_indexes[0];
 						lang_idx = i;
 						break;

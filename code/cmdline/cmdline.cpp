@@ -443,7 +443,7 @@ char *Cmdline_gateway_ip = nullptr;
 cmdline_parm portable_mode("-portable_mode", NULL, AT_NONE);
 cmdline_parm joy_info("-joy_info", "Outputs SDL joystick info", AT_NONE);
 cmdline_parm lang_arg("-language", "Language name as defined in strings.tbl", AT_STRING);
-cmdline_parm voice_lang_arg("-voice_language", "Language name as defined in strings.tbl, for voice files only; or same-as-text, or original", AT_STRING);
+cmdline_parm voice_lang_arg("-voice_language", "Language name or BCP 47 tag as defined in strings.tbl, for voice files only; or same-as-text, or original", AT_STRING);
 
 bool Cmdline_portable_mode = false;
 SCP_string Cmdline_lang;

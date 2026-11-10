@@ -31,6 +31,9 @@
 
 // for language name strings
 #define LCL_LANG_NAME_LEN				32
+// RFC 5646 section 4.4.1 asks for room for at least 35 characters in a language tag; 64 also fits most
+// tags with extensions or private-use subtags
+#define LCL_BCP47_LEN					64
 
 #define LCL_MIN_FONTS					3
 
@@ -43,6 +46,7 @@ typedef struct lang_info {
 														// note: treats 0 as "none" since a zero offset in a font makes no sense
 														// i.e. all the normal chars start at zero
 	int checksum;										// used for language auto-detection
+	char lang_bcp47[LCL_BCP47_LEN + 1];				// optional BCP 47 tag, such as "zh-TW"; empty if the table gives none
 } lang_info;
 
 // These are the original languages supported by FS2. The code expects these languages to be supported even if the tables don't

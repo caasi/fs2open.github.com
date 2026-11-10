@@ -1,5 +1,7 @@
 #include <gtest/gtest.h>
 
+#include <algorithm>
+
 #include "cfile/cfile.h"
 #include "cmdline/cmdline.h"
 #include "localization/localize.h"
@@ -21,7 +23,10 @@
 //                                     *TheModDefault and FlagBeatsModDefault
 class VoiceLanguageTest : public test::FSTestFixture {
   public:
-	VoiceLanguageTest() : test::FSTestFixture(INIT_MOD_TABLE | INIT_CFILE) { pushModDir("voice_language"); }
+	explicit VoiceLanguageTest(const char* mod_dir = "voice_language") : test::FSTestFixture(INIT_MOD_TABLE | INIT_CFILE)
+	{
+		pushModDir(mod_dir);
+	}
 
   protected:
 	// lcl_close() does not clear Lcl_languages, so the languages of an earlier test (and one more copy of English)
@@ -417,4 +422,145 @@ TEST_F(VoiceLanguageTest, LongNameIsLeftAlone)
 	// "long_name_1234567890abcde-tw.ogg" has MAX_FILENAME_LEN characters, one more than the sound code's buffers hold
 	EXPECT_EQ(lcl_get_voice_filename("long_name_1234567890abcde", CF_TYPE_ANY), "long_name_1234567890abcde");
 	EXPECT_EQ(lcl_get_voice_filename("long_name_1234567890abcde.ogg", CF_TYPE_ANY), "long_name_1234567890abcde.ogg");
+}
+
+// Test data (test_data/voice_language_bcp47):
+//   data/tables/zh-lcl.tbm            "Traditional Chinese (Taiwan)" tw zh-TW, "Simplified Chinese" cn zh-CN,
+//                                     "Traditional Chinese (Hong Kong)" hk zh-HK, "Klingon" kl with no tag, and
+//                                     "Decoy" dc, given twice: first with the tag "x-decoy", then with "Klingon",
+//                                     the name of another language
+//   data/voice/briefing/              foo.ogg, foo-tw.ogg, foo-cn.ogg, foo-hk.ogg, foo-kl.ogg
+//   <TestName>/data/tables/           game_settings.tbl with a "$Voice language:" for the tests named ModDefault*
+class VoiceLanguageTagTest : public VoiceLanguageTest {
+  public:
+	VoiceLanguageTagTest() : VoiceLanguageTest("voice_language_bcp47") {}
+
+  protected:
+	// the voice language as -voice_language gives it; set after SetUp(), so that lcl_init() does not check it
+	static int voice_lang_for_flag(const char* value)
+	{
+		Cmdline_voice_lang = value;
+		return lcl_get_voice_lang_index();
+	}
+
+	static SCP_string voice_file_for_flag(const char* value)
+	{
+		Cmdline_voice_lang = value;
+		return lcl_get_voice_filename("foo.ogg", CF_TYPE_ANY);
+	}
+};
+
+class VoiceLanguageTagCmdlineTest : public VoiceLanguageTagTest {
+  public:
+	VoiceLanguageTagCmdlineTest()
+	{
+		addCommandlineArg("-voice_language");
+		addCommandlineArg("ZH-hk");
+	}
+};
+
+TEST_F(VoiceLanguageTagTest, TableReadsTheTag)
+{
+	int tw = lcl_find_lang_index_by_name("Traditional Chinese (Taiwan)");
+	int klingon = lcl_find_lang_index_by_name("Klingon");
+	ASSERT_GE(tw, 0);
+	ASSERT_GE(klingon, 0);
+
+	EXPECT_STREQ(Lcl_languages[tw].lang_ext, "tw");
+	EXPECT_STREQ(Lcl_languages[tw].lang_bcp47, "zh-TW");
+	// the tag of the language before it must not carry over
+	EXPECT_STREQ(Lcl_languages[klingon].lang_bcp47, "");
+	EXPECT_STREQ(Lcl_languages[LCL_ENGLISH].lang_bcp47, "");
+	// a second entry for "Decoy" replaces the tag "x-decoy" of the first
+	EXPECT_STREQ(Lcl_languages[lcl_find_lang_index_by_name("Decoy")].lang_bcp47, "Klingon");
+}
+
+TEST_F(VoiceLanguageTagTest, LongTagIsKeptWhole)
+{
+	// RFC 5646 section 4.4.1 asks for at least 35 characters; this valid tag has 39
+	EXPECT_STREQ(Lcl_languages[lcl_find_lang_index_by_name("Long Tag")].lang_bcp47, "zh-Latn-TW-x-abcdefgh-abcdefgh-abcdefgh");
+	EXPECT_EQ(voice_file_for_flag("zh-Latn-TW-x-abcdefgh-abcdefgh-abcdefgh"), "foo-lt.ogg");
+}
+
+TEST_F(VoiceLanguageTagTest, FlagSelectsEachLanguageByTag)
+{
+	EXPECT_EQ(voice_file_for_flag("zh-TW"), "foo-tw.ogg");
+	EXPECT_EQ(voice_file_for_flag("zh-CN"), "foo-cn.ogg");
+	EXPECT_EQ(voice_file_for_flag("zh-HK"), "foo-hk.ogg");
+}
+
+TEST_F(VoiceLanguageTagTest, FlagSelectsEachLanguageByName)
+{
+	EXPECT_EQ(voice_file_for_flag("Traditional Chinese (Taiwan)"), "foo-tw.ogg");
+	EXPECT_EQ(voice_file_for_flag("Simplified Chinese"), "foo-cn.ogg");
+	EXPECT_EQ(voice_file_for_flag("Traditional Chinese (Hong Kong)"), "foo-hk.ogg");
+}
+
+TEST_F(VoiceLanguageTagTest, TagMatchIgnoresCase)
+{
+	EXPECT_EQ(voice_file_for_flag("zh-tw"), "foo-tw.ogg");
+	EXPECT_EQ(voice_file_for_flag("ZH-CN"), "foo-cn.ogg");
+	EXPECT_EQ(voice_file_for_flag("Zh-Hk"), "foo-hk.ogg");
+}
+
+TEST_F(VoiceLanguageTagTest, UnknownTagFallsThrough)
+{
+	// like an unknown name: the flag does not count, and the next source decides
+	EXPECT_EQ(voice_lang_for_flag("zh-SG"), LCL_VOICE_ORIGINAL);
+
+	Using_in_game_options = true;
+	set_player_voice_language("Simplified Chinese", "cn");
+	EXPECT_EQ(voice_lang_for_flag("zh-SG"), lcl_find_lang_index_by_name("Simplified Chinese"));
+	// a tag is not a prefix match
+	EXPECT_EQ(voice_lang_for_flag("zh"), lcl_find_lang_index_by_name("Simplified Chinese"));
+}
+
+TEST_F(VoiceLanguageTagTest, LanguageWithoutTagWorks)
+{
+	EXPECT_EQ(voice_file_for_flag("Klingon"), "foo-kl.ogg");
+}
+
+TEST_F(VoiceLanguageTagTest, NameBeatsTag)
+{
+	// "Klingon" is the name of one language and the tag of another; the name wins
+	EXPECT_EQ(voice_lang_for_flag("Klingon"), lcl_find_lang_index_by_name("Klingon"));
+	EXPECT_EQ(voice_lang_for_flag("klingon"), lcl_find_lang_index_by_name("Klingon"));
+}
+
+TEST_F(VoiceLanguageTagTest, ModDefaultTag)
+{
+	ASSERT_EQ(Default_voice_language, "zh-cn");
+	EXPECT_EQ(lcl_get_voice_lang_index(), lcl_find_lang_index_by_name("Simplified Chinese"));
+	EXPECT_EQ(lcl_get_voice_filename("foo.ogg", CF_TYPE_ANY), "foo-cn.ogg");
+}
+
+TEST_F(VoiceLanguageTagTest, ModDefaultName)
+{
+	ASSERT_EQ(Default_voice_language, "Traditional Chinese (Hong Kong)");
+	EXPECT_EQ(lcl_get_voice_lang_index(), lcl_find_lang_index_by_name("Traditional Chinese (Hong Kong)"));
+	EXPECT_EQ(lcl_get_voice_filename("foo.ogg", CF_TYPE_ANY), "foo-hk.ogg");
+}
+
+TEST_F(VoiceLanguageTagCmdlineTest, CommandLineTag)
+{
+	EXPECT_EQ(lcl_get_voice_lang_index(), lcl_find_lang_index_by_name("Traditional Chinese (Hong Kong)"));
+	EXPECT_EQ(lcl_get_voice_filename("foo.ogg", CF_TYPE_ANY), "foo-hk.ogg");
+
+	// lcl_init() accepted the tag and shows it in the menu as an override
+	EXPECT_TRUE(options::OptionsManager::instance()->isOverridden("Audio.VoiceLanguage"));
+	EXPECT_EQ(option_display(), "Traditional Chinese (Hong Kong) [zh-HK]");
+}
+
+TEST_F(VoiceLanguageTagTest, MenuShowsTheTag)
+{
+	auto* opt = options::OptionsManager::instance()->getOptionByKey("Audio.VoiceLanguage");
+	ASSERT_NE(opt, nullptr);
+
+	SCP_vector<SCP_string> shown;
+	for (const auto& value : opt->getValidValues()) {
+		shown.push_back(value.display);
+	}
+	EXPECT_NE(std::find(shown.begin(), shown.end(), "Traditional Chinese (Taiwan) [zh-TW]"), shown.end());
+	EXPECT_NE(std::find(shown.begin(), shown.end(), "Klingon"), shown.end());
+	EXPECT_NE(std::find(shown.begin(), shown.end(), "English"), shown.end());
 }

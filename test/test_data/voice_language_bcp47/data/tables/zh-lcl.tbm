@@ -1,0 +1,31 @@
+#Supported Languages
+$Language: Traditional Chinese (Taiwan)
++Extension: tw
++BCP47: zh-TW
++Special Character Index: 0
+$Language: Simplified Chinese
++Extension: cn
++BCP47: zh-CN
++Special Character Index: 0
+$Language: Traditional Chinese (Hong Kong)
++Extension: hk
++BCP47: zh-HK
++Special Character Index: 0
+$Language: Klingon
++Extension: kl
++Special Character Index: 0
+$Language: Decoy
++Extension: dc
++BCP47: x-decoy
++Special Character Index: 0
+; a later entry for the same language replaces its extension and tag
+$Language: Decoy
++Extension: dc
++BCP47: Klingon
++Special Character Index: 0
+$Language: Long Tag
++Extension: lt
++BCP47: zh-Latn-TW-x-abcdefgh-abcdefgh-abcdefgh
++Special Character Index: 0
+
+#End
