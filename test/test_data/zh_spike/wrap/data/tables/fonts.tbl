@@ -1,0 +1,15 @@
+#Fonts
+
+$TrueType: DroidSansFallbackFull.ttf
+    +Name: zh
+    +Size: 16
+
+$TrueType: DroidSansFallbackFull.ttf
+    +Name: zh2
+    +Size: 12
+
+$TrueType: DroidSansFallbackFull.ttf
+    +Name: zh3
+    +Size: 24
+
+#End
