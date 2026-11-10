@@ -138,6 +138,8 @@ static ShaderVariantInfo SHADER_VARIANTS[] = {
 
 	{SDR_TYPE_DEFERRED_LIGHTING, false, SDR_FLAG_DEFERRED_SSAO, "SSAO", {}, "Multiply the ambient term by the screen-space AO buffer (spike)"},
 
+	{SDR_TYPE_DEFERRED_LIGHTING, false, SDR_FLAG_DEFERRED_SSAO_ALL, "SSAO_ALL", {}, "Also multiply direct light and env specular by the AO buffer (spike)"},
+
 	{SDR_TYPE_SSAO, false, SDR_FLAG_SSAO_BLUR_H, "BLUR_H", {}, "SSAO depth-aware blur, horizontal"},
 
 	{SDR_TYPE_SSAO, false, SDR_FLAG_SSAO_BLUR_V, "BLUR_V", {}, "SSAO depth-aware blur, vertical"},

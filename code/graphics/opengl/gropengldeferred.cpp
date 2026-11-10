@@ -379,7 +379,9 @@ void gr_opengl_deferred_lighting_finish()
 	// GL_state.DepthFunc(GL_GREATER);
 	// GL_state.DepthMask(GL_FALSE);
 
-	const int deferred_flags = (ENVMAP > 0 ? SDR_FLAG_ENV_MAP : 0) | (Cmdline_ssao_spike ? SDR_FLAG_DEFERRED_SSAO : 0);
+	const int deferred_flags = (ENVMAP > 0 ? SDR_FLAG_ENV_MAP : 0) | (Cmdline_ssao_spike ? SDR_FLAG_DEFERRED_SSAO : 0)
+		// Spike only: FSO_SSAO_ALL=1 lets AO darken every light term, not just ambient.
+		| (Cmdline_ssao_spike && getenv("FSO_SSAO_ALL") ? SDR_FLAG_DEFERRED_SSAO_ALL : 0);
 	opengl_shader_set_current(gr_opengl_maybe_create_shader(SDR_TYPE_DEFERRED_LIGHTING, deferred_flags));
 	
 	// Render on top of the composite buffer texture

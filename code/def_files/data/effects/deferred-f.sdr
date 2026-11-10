@@ -314,6 +314,10 @@ void main()
 #ifdef ENV_MAP
 		vec3 envLight;
 		ComputeEnvLight(alpha, ao, reflectDir, eyeDir, normal, diffuse, specColor, envLight);
+#ifdef SSAO_ALL
+		// The diffuse env part already carries ao; this also darkens the specular env part.
+		envLight *= texture(AOBuffer, screenPos).r;
+#endif
 		fragmentColor.rgb += envLight;
 #endif
 	}
@@ -351,6 +355,10 @@ void main()
 		vec3 halfVec = normalize(lightDir + eyeDir);
 		float NdotL = clamp(dot(normal, lightDir), 0.0, 1.0);
 		fragmentColor.rgb = computeLighting(specColor.rgb, diffColor, lightDir, normal.xyz, halfVec, eyeDir, roughness, fresnel, NdotL).rgb * diffuseLightColor * attenuation * area_normalisation;
+#ifdef SSAO_ALL
+		// Not physical: screen-space AO has no light direction. Spike knob to see the AO at all.
+		fragmentColor.rgb *= texture(AOBuffer, screenPos).r;
+#endif
 	}
 	
 	fragOut0 = max(fragmentColor, vec4(0.0));
