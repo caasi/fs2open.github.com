@@ -65,6 +65,7 @@ extern int Cmdline_normal;
 extern int Cmdline_height;
 extern int Cmdline_softparticles;
 extern int Cmdline_no_deferred_lighting;
+extern int Cmdline_ssao_spike;
 extern bool Cmdline_deferred_lighting_cockpit;
 extern int Cmdline_emissive;
 extern int Cmdline_aniso_level;

@@ -380,6 +380,15 @@ struct msaa_data {
 	float pad[2];
 };
 
+struct ssao_data {
+	matrix4 projMatrix;
+
+	float radius;
+	float power;
+	float maxPixelRadius;
+	float pad0;
+};
+
 struct blur_data {
 	float texSize;
 	int level;

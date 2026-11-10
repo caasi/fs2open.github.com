@@ -360,6 +360,7 @@ cmdline_parm shadow_quality_arg("-shadow_quality", NULL, AT_INT);
 cmdline_parm enable_shadows_arg("-enable_shadows", NULL, AT_NONE);
 cmdline_parm rt_shadows_arg("-rt_shadows", nullptr, AT_NONE);
 cmdline_parm no_deferred_lighting_arg("-no_deferred", NULL, AT_NONE);	// Cmdline_no_deferred
+cmdline_parm ssao_spike_arg("-ssao_spike", nullptr, AT_NONE);	// Cmdline_ssao_spike (throwaway spike)
 cmdline_parm deferred_lighting_cockpit_arg("-deferred_cockpit", nullptr, AT_NONE);
 cmdline_parm anisotropy_level_arg("-anisotropic_filter", NULL, AT_INT);
 
@@ -376,6 +377,7 @@ int Cmdline_normal = 1;
 int Cmdline_height = 1;
 int Cmdline_softparticles = 0;
 int Cmdline_no_deferred_lighting = 0;
+int Cmdline_ssao_spike = 0;
 bool Cmdline_deferred_lighting_cockpit = false;
 int Cmdline_aniso_level = 0;
 int Cmdline_msaa_enabled = 0;
@@ -2376,6 +2378,10 @@ bool SetCmdlineParams()
 		Cmdline_no_deferred_lighting = 1;
 		options::OptionsManager::instance()->setOverride("Graphics.DeferredLighting",
 			std::unique_ptr<json_t>(json_false()), "-no_deferred");
+	}
+
+	if (ssao_spike_arg.found()) {
+		Cmdline_ssao_spike = 1;
 	}
 
 	if( deferred_lighting_cockpit_arg.found() )

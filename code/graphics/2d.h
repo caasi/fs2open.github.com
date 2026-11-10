@@ -232,6 +232,8 @@ enum shader_type {
 
 	SDR_TYPE_GAMMA_BLIT,
 
+	SDR_TYPE_SSAO,
+
 	NUM_SHADER_TYPES
 };
 
@@ -262,6 +264,10 @@ enum shader_type {
 
 #define SDR_FLAG_ENV_MAP (1 << 0)
 #define SDR_FLAG_DEFERRED_RT_SHADOWS (1 << 1)
+#define SDR_FLAG_DEFERRED_SSAO (1 << 2)
+
+#define SDR_FLAG_SSAO_BLUR_H (1 << 0)
+#define SDR_FLAG_SSAO_BLUR_V (1 << 1)
 
 #define SDR_FLAG_SHADOW_FALLBACK (1 << 0)
 

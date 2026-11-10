@@ -116,6 +116,9 @@ static ShaderTypeInfo SHADER_TYPES[] = {
 
 	{ SDR_TYPE_GAMMA_BLIT, "post-v.sdr", "gamma-correct-f.sdr", nullptr,
 		{ VATTRIB_POSITION, VATTRIB_TEXCOORD }, "Gamma correct blit", false },
+
+	{ SDR_TYPE_SSAO, "post-v.sdr", "ssao-f.sdr", nullptr,
+		{ VATTRIB_POSITION, VATTRIB_TEXCOORD }, "SSAO (spike)", false },
 };
 // clang-format on
 
@@ -132,6 +135,12 @@ static ShaderVariantInfo SHADER_VARIANTS[] = {
 	{SDR_TYPE_DEFERRED_LIGHTING, false, SDR_FLAG_ENV_MAP, "ENV_MAP", {}, "Render ambient light with env and irrmaps"},
 
 	{SDR_TYPE_DEFERRED_LIGHTING, false, SDR_FLAG_DEFERRED_RT_SHADOWS, "RT_SHADOWS", {}, "Use raytraced (TLAS ray query) shadows instead of cascaded shadow maps"},
+
+	{SDR_TYPE_DEFERRED_LIGHTING, false, SDR_FLAG_DEFERRED_SSAO, "SSAO", {}, "Multiply the ambient term by the screen-space AO buffer (spike)"},
+
+	{SDR_TYPE_SSAO, false, SDR_FLAG_SSAO_BLUR_H, "BLUR_H", {}, "SSAO depth-aware blur, horizontal"},
+
+	{SDR_TYPE_SSAO, false, SDR_FLAG_SSAO_BLUR_V, "BLUR_V", {}, "SSAO depth-aware blur, vertical"},
 
 	{SDR_TYPE_POST_PROCESS_BLUR, false, SDR_FLAG_BLUR_HORIZONTAL, "PASS_0", {}, "Horizontal blur pass"},
 
