@@ -300,9 +300,14 @@ static void opengl_ssao_pass()
 
 	opengl_set_generic_uniform_data<graphics::generic_data::ssao_data>([](graphics::generic_data::ssao_data* data) {
 		data->projMatrix = gr_projection_matrix;
-		data->radius = 4.0f;
-		data->power = 1.5f;
+		// Spike only: FSO_SSAO_RADIUS / FSO_SSAO_POWER override the defaults to test scene scale.
+		static const float radius = getenv("FSO_SSAO_RADIUS") ? (float)atof(getenv("FSO_SSAO_RADIUS")) : 4.0f;
+		static const float power = getenv("FSO_SSAO_POWER") ? (float)atof(getenv("FSO_SSAO_POWER")) : 1.5f;
+		data->radius = radius;
+		data->power = power;
 		data->maxPixelRadius = 96.0f;
+		static const char* dbg = getenv("FSO_SSAO_DEBUG");
+		data->debugMode = (dbg != nullptr && atoi(dbg) == 2) ? 2.0f : 0.0f;
 	});
 
 	struct ssao_step { int flags; GLuint input; GLuint output; };
@@ -327,6 +332,26 @@ static void opengl_ssao_pass()
 	}
 
 	glEndQuery(GL_TIME_ELAPSED);
+
+	// Spike only: FSO_SSAO_DUMP=<path> writes the blurred AO buffer as a PGM every 300 frames
+	// and logs its mean, so AO can be checked without the tonemapped debug view.
+	if (const char* dump = getenv("FSO_SSAO_DUMP"); dump != nullptr && Ssao_frame % 300 == 150) {
+		SCP_vector<GLubyte> px(Ssao_width * Ssao_height);
+		glPixelStorei(GL_PACK_ALIGNMENT, 1);
+		GL_state.Texture.Enable(0, GL_TEXTURE_2D, Ssao_tex[0]);
+		glGetTexImage(GL_TEXTURE_2D, 0, GL_RED, GL_UNSIGNED_BYTE, px.data());
+		double sum = 0;
+		int dark = 0;
+		for (auto v : px) { sum += v; dark += v < 230; }
+		mprintf(("SSAO spike: AO buffer frame %d: mean %.3f, %.2f%% of pixels below 0.9\n", Ssao_frame,
+			sum / px.size() / 255.0, 100.0 * dark / px.size()));
+		SCP_string path = SCP_string(dump) + "_" + std::to_string(Ssao_frame) + ".pgm";
+		if (FILE* f = fopen(path.c_str(), "wb")) {
+			fprintf(f, "P5\n%d %d\n255\n", Ssao_width, Ssao_height);
+			fwrite(px.data(), 1, px.size(), f);
+			fclose(f);
+		}
+	}
 	Ssao_frame++;
 
 	GL_state.BindFrameBuffer(Scene_framebuffer);

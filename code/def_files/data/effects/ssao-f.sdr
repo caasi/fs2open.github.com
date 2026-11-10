@@ -23,7 +23,7 @@ layout(std140) uniform genericData {
 	float radius;         // world-space (view-space) sampling radius
 	float power;          // final contrast
 	float maxPixelRadius; // clamp of the screen-space radius, in full-res pixels
-	float pad0;
+	float debugMode;      // spike: 2 = encode why a pixel exits early
 };
 
 const float PI = 3.14159265;
@@ -94,7 +94,8 @@ void main()
 	float pixRadius = radius * projMatrix[1][1] * 0.5 * float(fullSize.y) / -P.z;
 	pixRadius = min(pixRadius, maxPixelRadius);
 	if (pixRadius < 1.5) {
-		fragOut0 = vec4(1.0);
+		// debugMode 2: 0.5 = too far for the radius (AO skipped)
+		fragOut0 = vec4(debugMode == 2.0 ? 0.5 : 1.0);
 		return;
 	}
 
@@ -156,7 +157,8 @@ void main()
 		visibility += projNLen * (iarc0 + iarc1);
 	}
 	visibility = clamp(visibility / float(SLICE_COUNT), 0.0, 1.0);
-	fragOut0 = vec4(pow(visibility, power));
+	// debugMode 2: AO computed, mapped into 0..0.4 so it is apart from the skip code
+	fragOut0 = vec4(debugMode == 2.0 ? 0.4 * pow(visibility, power) : pow(visibility, power));
 }
 
 #endif

@@ -386,7 +386,7 @@ struct ssao_data {
 	float radius;
 	float power;
 	float maxPixelRadius;
-	float pad0;
+	float debugMode;
 };
 
 struct blur_data {
