@@ -57,6 +57,7 @@ add_file_folder("model"
 
 add_file_folder("Localization"
     localization/test_zh_spike.cpp
+    localization/test_zh_render.cpp
 )
 
 add_file_folder("Options"
