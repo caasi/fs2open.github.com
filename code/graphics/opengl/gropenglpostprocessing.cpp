@@ -21,7 +21,10 @@
 #include "lighting/lighting_profiles.h"
 #include "mod_table/mod_table.h"
 #include "nebula/neb.h"
+#include "ai/ai.h"
+#include "object/object.h"
 #include "parse/parselo.h"
+#include "render/3d.h"
 #include "ship/ship.h"
 #include "tracing/tracing.h"
 #ifdef USE_OPENGL_ES
@@ -214,6 +217,143 @@ void opengl_post_pass_bloom()
 	// reset viewport, scissor test and exit
 	GL_state.ScissorTest(scissor_test);
 }
+
+// ---- DoF spike (throwaway) -------------------------------------------------
+// One full-resolution gather pass (dof-f.sdr) on the HDR scene colour, before
+// bloom and tonemapping, then a copy back into Scene_color_texture.
+static GLuint Dof_fbo = 0;
+static GLuint Dof_tex = 0;
+static GLuint Dof_timer[2] = {0, 0};
+static int Dof_frame = 0;
+
+static float dof_env(const char* name, float def)
+{
+	const char* v = getenv(name);
+	return v != nullptr ? (float)atof(v) : def;
+}
+
+// FSO_DOF_FOCUS: metres, "player" (the player ship: the near fighter in chase view)
+// or "target" (the player's current target). Distances are view-space z, the same
+// quantity the shader compares against, not the distance to the eye.
+static float dof_focus_distance()
+{
+	static const char* mode = getenv("FSO_DOF_FOCUS");
+	const object* obj = nullptr;
+	if (mode != nullptr && !stricmp(mode, "player")) {
+		obj = Player_obj;
+	} else if (mode != nullptr && !stricmp(mode, "target") && Player_ai != nullptr && Player_ai->target_objnum >= 0) {
+		obj = &Objects[Player_ai->target_objnum];
+	} else if (mode != nullptr && isdigit(mode[0])) {
+		return (float)atof(mode);
+	}
+	if (obj == nullptr) {
+		return 50.0f;
+	}
+	vec3d to_obj;
+	vm_vec_sub(&to_obj, &obj->pos, &Eye_position);
+	return MAX(1.0f, vm_vec_dot(&to_obj, &Eye_matrix.vec.fvec));
+}
+
+static void opengl_dof_report_timer(GLuint query)
+{
+	static GLuint64 sum_ns = 0, min_ns = ~GLuint64(0), max_ns = 0;
+	static int samples = 0;
+
+	GLuint available = 0;
+	glGetQueryObjectuiv(query, GL_QUERY_RESULT_AVAILABLE, &available);
+	if (!available) {
+		return;
+	}
+	GLuint64 ns = 0;
+	glGetQueryObjectui64v(query, GL_QUERY_RESULT, &ns);
+	sum_ns += ns;
+	min_ns = MIN(min_ns, ns);
+	max_ns = MAX(max_ns, ns);
+	if (++samples == 300) {
+		mprintf(("DoF spike: GPU time over %d frames: avg %.3f ms, min %.3f ms, max %.3f ms\n", samples,
+			sum_ns / samples / 1e6, min_ns / 1e6, max_ns / 1e6));
+		sum_ns = 0; min_ns = ~GLuint64(0); max_ns = 0; samples = 0;
+	}
+}
+
+static void opengl_dof_pass()
+{
+	GR_DEBUG_SCOPE("DoF spike");
+
+	if (Dof_fbo == 0) {
+		// ponytail: sized once at first use; a resolution change needs a restart.
+		glGenFramebuffers(1, &Dof_fbo);
+		glGenTextures(1, &Dof_tex);
+		GL_state.Texture.SetActiveUnit(0);
+		GL_state.Texture.SetTarget(GL_TEXTURE_2D);
+		GL_state.Texture.Enable(Dof_tex);
+		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, Scene_texture_width, Scene_texture_height, 0, GL_RGBA, GL_FLOAT, nullptr);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+		opengl_set_object_label(GL_TEXTURE, Dof_tex, "DoF spike texture");
+		opengl_set_object_label(GL_FRAMEBUFFER, Dof_fbo, "DoF spike framebuffer");
+		glGenQueries(2, Dof_timer);
+		mprintf(("DoF spike: %dx%d RGBA16F\n", Scene_texture_width, Scene_texture_height));
+	}
+
+	// Two queries in flight: read the one from two frames ago without a stall.
+	GLuint query = Dof_timer[Dof_frame & 1];
+	if (Dof_frame >= 2) {
+		opengl_dof_report_timer(query);
+	}
+	glBeginQuery(GL_TIME_ELAPSED, query);
+
+	GL_state.BindFrameBuffer(Dof_fbo);
+	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, Dof_tex, 0);
+	glViewport(0, 0, Scene_texture_width, Scene_texture_height);
+	GL_state.SetAlphaBlendMode(ALPHA_BLEND_NONE);
+
+	opengl_shader_set_current(gr_opengl_maybe_create_shader(SDR_TYPE_DOF, 0));
+	Current_shader->program->Uniforms.setTextureUniform("tex", 0);
+	Current_shader->program->Uniforms.setTextureUniform("depth_tex", 1);
+	GL_state.Texture.Enable(0, GL_TEXTURE_2D, Scene_color_texture);
+	GL_state.Texture.Enable(1, GL_TEXTURE_2D, Scene_depth_texture);
+
+	const float focus = dof_focus_distance();
+	opengl_set_generic_uniform_data<graphics::generic_data::dof_data>([&](graphics::generic_data::dof_data* data) {
+		// FSO_DOF_FOCUS_UV="u v" focuses on the depth under that screen point (0.5 0.5 = centre).
+		static const char* uv = getenv("FSO_DOF_FOCUS_UV");
+		data->focusU = -1.0f;
+		data->focusV = -1.0f;
+		if (uv != nullptr) {
+			sscanf(uv, "%f %f", &data->focusU, &data->focusV);
+		}
+		data->focusDist = focus;
+		data->focusRange = dof_env("FSO_DOF_RANGE", 0.0f);
+		data->aperture = dof_env("FSO_DOF_APERTURE", 8.0f);
+		data->maxBlur = dof_env("FSO_DOF_MAXBLUR", 12.0f);
+		data->zNear = Min_draw_distance;
+		data->zFar = Max_draw_distance;
+		data->skyBlur = dof_env("FSO_DOF_SKY", 1.0f);
+		data->debugMode = dof_env("FSO_DOF_DEBUG", 0.0f);
+	});
+	opengl_draw_full_screen_textured(0.0f, 0.0f, 1.0f, 1.0f);
+
+	// Copy back, so bloom, tonemapping and AA run on the blurred scene unchanged.
+	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, Scene_color_texture, 0);
+	opengl_shader_set_current(gr_opengl_maybe_create_shader(SDR_TYPE_COPY, 0));
+	Current_shader->program->Uniforms.setTextureUniform("tex", 0);
+	GL_state.Texture.Enable(0, GL_TEXTURE_2D, Dof_tex);
+	opengl_draw_full_screen_textured(0.0f, 0.0f, 1.0f, 1.0f);
+	// Detach, so Scene_color_texture is not attached to two framebuffers.
+	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, Dof_tex, 0);
+
+	glEndQuery(GL_TIME_ELAPSED);
+	if (Dof_frame % 300 == 150) {
+		mprintf(("DoF spike: frame %d, focus %.1f m\n", Dof_frame, focus));
+	}
+	Dof_frame++;
+
+	glViewport(0, 0, gr_screen.max_w, gr_screen.max_h);
+}
+// ---- end DoF spike ----------------------------------------------------------
 
 void gr_opengl_post_process_begin()
 {
@@ -514,6 +654,10 @@ void gr_opengl_post_process_end()
 	GL_state.Texture.SetShaderMode(GL_TRUE);
 
 	GL_state.PushFramebufferState();
+
+	if (Cmdline_dof_spike) {
+		opengl_dof_pass();
+	}
 
 	// do bloom, hopefully ;)
 	opengl_post_pass_bloom();

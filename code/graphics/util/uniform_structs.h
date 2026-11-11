@@ -380,6 +380,22 @@ struct msaa_data {
 	float pad[2];
 };
 
+struct dof_data {
+	float focusU;
+	float focusV;
+	float focusDist;
+	float focusRange;
+
+	float aperture;
+	float maxBlur;
+	float zNear;
+	float zFar;
+
+	float skyBlur;
+	float debugMode;
+	float pad[2];
+};
+
 struct blur_data {
 	float texSize;
 	int level;

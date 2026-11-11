@@ -1,0 +1,88 @@
+// DoF spike (throwaway). One full-resolution gather pass on the HDR scene colour:
+// circle of confusion (CoC) from linear depth with a thin-lens model, a golden-angle
+// disc of samples, and scatter-as-gather weights (a sample counts when its own CoC
+// reaches the centre pixel).
+#ifdef GL_ES
+precision highp float;
+precision highp sampler2D;
+#endif
+
+layout(location = 0) out vec4 fragOut0;
+
+in vec4 fragTexCoord;
+
+uniform sampler2D tex;       // HDR scene colour
+uniform sampler2D depth_tex; // scene depth, standard [0,1] perspective depth
+
+layout(std140) uniform genericData {
+	vec2 focusUV;     // when x >= 0: focus = depth under this screen point (autofocus on the GPU)
+	float focusDist;  // view-space z of the focus plane, in metres (when focusUV.x < 0)
+	float focusRange; // metres around the focus plane that stay sharp
+
+	float aperture;   // CoC in pixels of a point at infinity
+	float maxBlur;    // CoC clamp in pixels; also the gather radius
+	float zNear;
+	float zFar;
+
+	float skyBlur;    // scale of the CoC of pixels with no depth (background, starfield)
+	float debugMode;  // 1 = show CoC: red behind focus, green in front
+	float pad0;
+	float pad1;
+};
+
+const int SAMPLES = 64;
+const float GOLDEN_ANGLE = 2.39996323;
+
+float linear_z(float d)
+{
+	return 2.0 * zNear * zFar / (zFar + zNear - (2.0 * d - 1.0) * (zFar - zNear));
+}
+
+// Signed CoC in pixels: > 0 behind the focus plane, < 0 in front of it.
+float coc_of(float d, float F)
+{
+	float z = linear_z(d);
+	// Thin lens: CoC ~ |1 - F/z|. Subtracting R/(2F) gives a sharp band about R wide.
+	float c = max(0.0, abs(1.0 - F / z) - 0.5 * focusRange / F) * aperture;
+	c = min(c, maxBlur);
+	if (d >= 1.0) {
+		c *= skyBlur;
+	}
+	return z < F ? -c : c;
+}
+
+void main()
+{
+	vec2 uv = fragTexCoord.xy;
+	vec2 texel = 1.0 / vec2(textureSize(tex, 0));
+	float F = focusUV.x >= 0.0 ? linear_z(texture(depth_tex, focusUV).x) : focusDist;
+
+	float d0 = texture(depth_tex, uv).x;
+	float z0 = linear_z(d0);
+	float c0 = abs(coc_of(d0, F));
+
+	if (debugMode > 0.5) {
+		float s = coc_of(d0, F) / maxBlur;
+		fragOut0 = vec4(max(s, 0.0), max(-s, 0.0), 0.0, 1.0) + 0.25 * texture(tex, uv);
+		return;
+	}
+
+	vec3 sum = texture(tex, uv).rgb;
+	float wsum = 1.0;
+	for (int i = 1; i < SAMPLES; i++) {
+		float r = maxBlur * sqrt(float(i) / float(SAMPLES));
+		float a = float(i) * GOLDEN_ANGLE;
+		vec2 suv = uv + vec2(cos(a), sin(a)) * r * texel;
+		float ds = texture(depth_tex, suv).x;
+		float cs = abs(coc_of(ds, F));
+		// A sample behind the centre may not spread over a sharper centre: this keeps
+		// the edge of an in-focus foreground ship from taking a halo of the background.
+		if (linear_z(ds) > z0) {
+			cs = min(cs, c0);
+		}
+		float w = clamp(cs - r + 1.0, 0.0, 1.0);
+		sum += texture(tex, suv).rgb * w;
+		wsum += w;
+	}
+	fragOut0 = vec4(sum / wsum, 1.0);
+}
