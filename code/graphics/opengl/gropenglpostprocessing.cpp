@@ -278,13 +278,54 @@ static void opengl_dof_report_timer(GLuint query)
 
 // FSO_DOF_BBOX=1 with FSO_DOF_FOCUS=target: the sharp band is the view-z extent of the
 // target's model bounding box (as Unity HDRP "Manual Ranges" sets near and far directly).
+static bool dof_object_band(const object* obj, float* zmin, float* zmax);
+
 static bool dof_target_band(float* zmin, float* zmax)
 {
 	static const bool on = dof_env("FSO_DOF_BBOX", 0.0f) > 0.5f;
 	if (!on || Player_ai == nullptr || Player_ai->target_objnum < 0) {
 		return false;
 	}
-	const object* obj = &Objects[Player_ai->target_objnum];
+	return dof_object_band(&Objects[Player_ai->target_objnum], zmin, zmax);
+}
+
+// Scale spike, far-only DoF: FSO_DOF_FAR="start tail". No near blur. The blur starts at
+// view z = zmin + start * (zmax - zmin) of the nearest ship with radius >= FSO_DOF_FAR_MINR
+// (default 200 m, the player excluded) and ramps linearly so that it reaches tail * maxBlur
+// at zmax (tail 1 = max blur at the ship's far end, 0.5 = half of it). The sky gets max blur.
+static bool dof_far_ramp(float* start, float* ramp)
+{
+	static const char* far_env = getenv("FSO_DOF_FAR");
+	static float frac = 0.0f, tail = 1.0f;
+	static const bool on = far_env != nullptr && sscanf(far_env, "%f %f", &frac, &tail) == 2;
+	if (!on) {
+		return false;
+	}
+	static const float min_r = dof_env("FSO_DOF_FAR_MINR", 200.0f);
+	const object* best = nullptr;
+	float best_d = FLT_MAX;
+	for (auto so : list_range(&Ship_obj_list)) {
+		const object* o = &Objects[so->objnum];
+		if (o == Player_obj || o->radius < min_r || o->flags[Object::Object_Flags::Should_be_dead]) {
+			continue;
+		}
+		const float d = vm_vec_dist(&o->pos, &Eye_position) - o->radius;
+		if (d < best_d) {
+			best_d = d;
+			best = o;
+		}
+	}
+	float zmin, zmax;
+	if (best == nullptr || !dof_object_band(best, &zmin, &zmax)) {
+		return false;
+	}
+	*start = zmin + frac * (zmax - zmin);
+	*ramp = MAX(1.0f, (zmax - *start) / tail);
+	return true;
+}
+
+static bool dof_object_band(const object* obj, float* zmin, float* zmax)
+{
 	if (obj->type != OBJ_SHIP) {
 		return false;
 	}
@@ -361,6 +402,8 @@ static void opengl_dof_pass()
 	const float focus = dof_focus_distance();
 	float band_near = 0.0f, band_far = 0.0f;
 	const bool band = dof_target_band(&band_near, &band_far);
+	float far_start = 0.0f, far_ramp = 0.0f;
+	const bool far_only = dof_far_ramp(&far_start, &far_ramp);
 
 	GLuint colour = Scene_color_texture;
 	if (Dof_src != 0) {
@@ -406,14 +449,17 @@ static void opengl_dof_pass()
 			data->samples = dof_env("FSO_DOF_SAMPLES", 64.0f);
 			data->lod = lod;
 			data->nearBlur = dof_env("FSO_DOF_NEARBLUR", 6.0f);
-			data->focusNear = band ? band_near : 0.0f;
+			data->focusNear = far_only ? far_start : band ? band_near : 0.0f;
 			data->focusFar = band ? band_far : 0.0f;
 			data->snap = dof_env("FSO_DOF_SNAP", 0.0f);
+			data->farRamp = far_only ? far_ramp : 0.0f;
 		});
 		opengl_draw_full_screen_textured(0.0f, 0.0f, 1.0f, 1.0f);
 	};
 
-	if (split) {
+	if (split && far_only) {
+		run(5, Dof_tex, Dof_near[1]);      // far-only: the shader skips the near field
+	} else if (split) {
 		run(1, Dof_near[0], 0);            // near CoC from depth, max over x
 		run(2, Dof_near[1], Dof_near[0]);  // max over y
 		run(3, Dof_near[0], Dof_near[1]);  // box blur x
@@ -434,7 +480,9 @@ static void opengl_dof_pass()
 
 	glEndQuery(GL_TIME_ELAPSED);
 	if (Dof_frame % 300 == 150) {
-		if (band) {
+		if (far_only) {
+			mprintf(("DoF spike: frame %d, far-only start %.1f m, ramp %.1f m\n", Dof_frame, far_start, far_ramp));
+		} else if (band) {
 			mprintf(("DoF spike: frame %d, focus %.1f m, band %.1f..%.1f m\n", Dof_frame, focus, band_near, band_far));
 		} else {
 			mprintf(("DoF spike: frame %d, focus %.1f m\n", Dof_frame, focus));

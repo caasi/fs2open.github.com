@@ -404,7 +404,7 @@ struct dof_data {
 	float focusNear;  // round 2: when > 0, CoC is 0 between focusNear and focusFar (view z)
 	float focusFar;
 	float snap;       // round 2: 1 = gather at texel centres
-	float pad;
+	float farRamp;    // scale spike: when > 0, far-only CoC from focusNear over farRamp metres
 };
 
 struct ssao_data {

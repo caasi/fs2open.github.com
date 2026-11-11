@@ -255,10 +255,17 @@ static void opengl_ssao_setup()
 	mprintf(("SSAO spike: %dx%d, two R8 textures, %d bytes of VRAM\n", Ssao_width, Ssao_height, 2 * Ssao_width * Ssao_height));
 }
 
-static void opengl_ssao_report_timer(GLuint query)
+struct spike_timer_stats {
+	GLuint64 sum_ns = 0, min_ns = ~GLuint64(0), max_ns = 0;
+	int samples = 0;
+};
+
+static void ssao_report_timer(GLuint query, const char* name, spike_timer_stats& st)
 {
-	static GLuint64 sum_ns = 0, min_ns = ~GLuint64(0), max_ns = 0;
-	static int samples = 0;
+	GLuint64& sum_ns = st.sum_ns;
+	GLuint64& min_ns = st.min_ns;
+	GLuint64& max_ns = st.max_ns;
+	int& samples = st.samples;
 
 	GLuint available = 0;
 	glGetQueryObjectuiv(query, GL_QUERY_RESULT_AVAILABLE, &available);
@@ -271,7 +278,7 @@ static void opengl_ssao_report_timer(GLuint query)
 	min_ns = MIN(min_ns, ns);
 	max_ns = MAX(max_ns, ns);
 	if (++samples == 300) {
-		mprintf(("SSAO spike: GPU time over %d frames: avg %.3f ms, min %.3f ms, max %.3f ms\n", samples,
+		mprintf(("%s: GPU time over %d frames: avg %.3f ms, min %.3f ms, max %.3f ms\n", name, samples,
 			sum_ns / samples / 1e6, min_ns / 1e6, max_ns / 1e6));
 		sum_ns = 0; min_ns = ~GLuint64(0); max_ns = 0; samples = 0;
 	}
@@ -288,7 +295,8 @@ static void opengl_ssao_pass()
 	// Two queries in flight: read the one from two frames ago without a stall.
 	GLuint query = Ssao_timer[Ssao_frame & 1];
 	if (Ssao_frame >= 2) {
-		opengl_ssao_report_timer(query);
+		static spike_timer_stats st;
+		ssao_report_timer(query, "SSAO spike", st);
 	}
 	glBeginQuery(GL_TIME_ELAPSED, query);
 
@@ -679,7 +687,14 @@ void gr_opengl_deferred_lighting_finish()
 	// Now reset back to drawing into the color buffer
 	glDrawBuffer(GL_COLOR_ATTACHMENT0);
 
-	bool bDrawFullNeb = The_mission.flags[Mission::Mission_Flags::Fullneb] && Neb2_render_mode != NEB2_RENDER_NONE && !override_fog;
+	// Scale spike: FSO_HAZE="r g b start half" runs the full-nebula fog pass in any mission as
+	// distance haze. Colour in sRGB 0-1; start = view depth (m) where haze begins; half = metres
+	// past start where the mix reaches 50%. FSO_HAZE_SKY = view depth given to sky pixels
+	// (default: start, so the sky is not hazed).
+	static const char* haze_env = getenv("FSO_HAZE");
+	static float haze[5] = {0.f, 0.f, 0.f, 0.f, 0.f};
+	static const bool haze_on = haze_env != nullptr && sscanf(haze_env, "%f %f %f %f %f", &haze[0], &haze[1], &haze[2], &haze[3], &haze[4]) == 5;
+	bool bDrawFullNeb = (The_mission.flags[Mission::Mission_Flags::Fullneb] && Neb2_render_mode != NEB2_RENDER_NONE && !override_fog) || haze_on;
 	bool bDrawNebVolumetrics = The_mission.volumetrics && The_mission.volumetrics->get_enabled() && !override_fog;
 
 	if (bDrawFullNeb) {
@@ -691,9 +706,33 @@ void gr_opengl_deferred_lighting_finish()
 		GL_state.Texture.Enable(1, GL_TEXTURE_2D, Scene_depth_texture);
 
 		float fog_near, fog_density;
-		neb2_get_adjusted_fog_values(&fog_near, &fog_density);
 		unsigned char r, g, b;
-		neb2_get_fog_color(&r, &g, &b);
+		float clip_inf = Neb2_fog_skybox_clip_distance, clip = Neb2_fog_clip_distance;
+		if (haze_on) {
+			r = (unsigned char)(haze[0] * 255.f);
+			g = (unsigned char)(haze[1] * 255.f);
+			b = (unsigned char)(haze[2] * 255.f);
+			fog_near = haze[3];
+			fog_density = powf(0.5f, 1.0f / haze[4]);  // fog = 1 - density^(z - start)
+			static const float sky = getenv("FSO_HAZE_SKY") ? (float)atof(getenv("FSO_HAZE_SKY")) : haze[3];
+			clip_inf = sky;
+			clip = Max_draw_distance;
+		} else {
+			neb2_get_adjusted_fog_values(&fog_near, &fog_density);
+			neb2_get_fog_color(&r, &g, &b);
+		}
+		static GLuint haze_timer[2] = {0, 0};
+		static int haze_frame = 0;
+		if (haze_on && haze_timer[0] == 0) {
+			glGenQueries(2, haze_timer);
+		}
+		if (haze_on && haze_frame >= 2) {
+			static spike_timer_stats st;
+			ssao_report_timer(haze_timer[haze_frame & 1], "Haze spike", st);
+		}
+		if (haze_on) {
+			glBeginQuery(GL_TIME_ELAPSED, haze_timer[haze_frame & 1]);
+		}
 
 		Current_shader->program->Uniforms.setTextureUniform("tex", 0);
 		Current_shader->program->Uniforms.setTextureUniform("depth_tex", 1);
@@ -706,11 +745,15 @@ void gr_opengl_deferred_lighting_finish()
 			data->fog_color.xyz.z = b / 255.f;
 			data->zNear           = Min_draw_distance;
 			data->zFar            = Max_draw_distance;
-			data->clip_inf_dist	  = Neb2_fog_skybox_clip_distance;
-			data->clip_dist       = Neb2_fog_clip_distance;
+			data->clip_inf_dist	  = clip_inf;
+			data->clip_dist       = clip;
 		});
 
 		opengl_draw_full_screen_textured(0.0f, 0.0f, 1.0f, 1.0f);
+		if (haze_on) {
+			glEndQuery(GL_TIME_ELAPSED);
+			haze_frame++;
+		}
 
 		if (bDrawNebVolumetrics) {
 			glReadBuffer(GL_COLOR_ATTACHMENT0);

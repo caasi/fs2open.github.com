@@ -40,7 +40,8 @@ layout(std140) uniform genericData {
 	float focusNear;  // when > 0: sharp band [focusNear, focusFar] in view z (bounding box of the target)
 	float focusFar;
 	float snap;       // 1 = sample colour and depth at texel centres (no bilinear colour leak across a depth edge)
-	float pad1;
+	float farRamp;    // scale spike: when > 0, far-only: CoC 0 before focusNear, then a linear ramp
+	                  // to maxBlur over farRamp metres; no near blur
 };
 
 const float GOLDEN_ANGLE = 2.39996323;
@@ -61,7 +62,10 @@ float coc_of(float d, float F)
 	float z = linear_z(d);
 	float c;
 	bool front;
-	if (focusNear > 0.0) {
+	if (farRamp > 0.0) {
+		front = false;
+		c = clamp((z - focusNear) / farRamp, 0.0, 1.0) * maxBlur / aperture;
+	} else if (focusNear > 0.0) {
 		front = z < focusNear;
 		c = front ? focusNear / z - 1.0 : max(0.0, 1.0 - focusFar / z);
 	} else {
@@ -205,7 +209,7 @@ void main()
 	// Near field: radius = dilated near CoC, so a blurred near object reaches out over
 	// sharp or far pixels. Each near sample spreads its colour over pi*cs^2 pixels;
 	// each of the N samples stands for pi*rn^2/N pixels of the disc.
-	float rn = texture(aux_tex, uv).r;
+	float rn = farRamp > 0.0 ? 0.0 : texture(aux_tex, uv).r;
 	float alpha = 0.0;
 	if (rn >= 0.5) {
 		vec3 nsum = vec3(0.0);

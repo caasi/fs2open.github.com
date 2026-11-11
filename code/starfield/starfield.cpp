@@ -235,6 +235,17 @@ void stars_load_motion_debris(motion_debris_bitmaps* vclips)
 
 void stars_load_debris(int fullneb, const SCP_string &custom_name)
 {
+	// Scale spike: FSO_DUST=<motion debris name> turns motion debris on with that type, past the
+	// option, the mod's enforced default and the set-motion-debris-override sexp.
+	if (const char* dust = getenv("FSO_DUST"); dust != nullptr && !Motion_debris_info.empty()) {
+		Motion_debris_enabled = true;
+		const int i = get_motion_debris_by_name(dust);
+		Assertion(i >= 0, "FSO_DUST: no motion debris named '%s'", dust);
+		stars_release_motion_debris(Motion_debris_ptr);
+		stars_load_motion_debris(Motion_debris_info[i].bitmaps);
+		Motion_debris_ptr = Motion_debris_info[i].bitmaps;
+		return;
+	}
 	if (!Motion_debris_enabled || Motion_debris_info.empty()) {
 		return;
 	}
@@ -1883,10 +1894,12 @@ void stars_draw_motion_debris()
 		return;
 	}
 
-	if (Motion_debris_override)
+	static const bool dust = getenv("FSO_DUST") != nullptr;
+	static const float dust_size = getenv("FSO_DUST_SIZE") ? (float)atof(getenv("FSO_DUST_SIZE")) : 1.0f;
+	if (Motion_debris_override && !dust)
 		return;
 
-	if (!Motion_debris_enabled || Motion_debris_info.empty()) {
+	if (!Motion_debris_enabled || Motion_debris_info.empty() || Motion_debris_ptr == nullptr) {
 		return;
 	}
 
@@ -1905,7 +1918,7 @@ void stars_draw_motion_debris()
 			if((The_mission.flags[Mission::Mission_Flags::Fullneb]) && (Neb2_render_mode != NEB2_RENDER_NONE)) {
 				mdebris.size = size_multiplier * BASE_SIZE_NEB;
 			} else {
-				mdebris.size = size_multiplier * BASE_SIZE;
+				mdebris.size = size_multiplier * BASE_SIZE * dust_size;
 			}
 		}
 
