@@ -393,7 +393,18 @@ struct dof_data {
 
 	float skyBlur;
 	float debugMode;
-	float pad[2];
+	float split;      // round 2: 1 = near/far split gather
+	float karis;      // round 2: 1 = weight samples by 1 / (1 + luminance)
+
+	float passMode;   // round 2: which pass of the chain (see dof-f.sdr)
+	float samples;    // gather taps
+	float lod;        // mip level the gather reads colour from (0 = full res)
+	float nearBlur;   // radius of the box blur after the near-CoC max filter, pixels
+
+	float focusNear;  // round 2: when > 0, CoC is 0 between focusNear and focusFar (view z)
+	float focusFar;
+	float snap;       // round 2: 1 = gather at texel centres
+	float pad;
 };
 
 struct blur_data {

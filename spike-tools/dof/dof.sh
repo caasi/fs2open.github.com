@@ -46,14 +46,23 @@ sleep 1
 ffmpeg -loglevel error -y -f x11grab -framerate 30 -video_size 1280x720 -i ":0+$x,$y" -t "$secs" \
   -c:v libx264 -crf 18 -preset veryfast -pix_fmt yuv420p "$out/$name.mp4" &
 rec=$!
+# SNAPS="<sec> ...": lossless PNG grabs of the game area at these seconds after recording starts.
+snaps=()
+for t in ${SNAPS:-}; do
+  (sleep "$t"; ffmpeg -loglevel error -y -f x11grab -video_size 1280x720 -i ":0+$x,$y" -frames:v 1 "$out/$name-s$t.png") &
+  snaps+=($!)
+done
 # With KEY (e.g. bracketright = 2/3 throttle) the ship waits at rest and starts 1 s into the recording.
 if [ -n "${KEY:-}" ]; then sleep 1; xin key "$KEY"; fi
 # KEYS="<sec>:<keysym> ...": more timed keys after recording starts (seconds from start, ascending).
 now=1
 for k in ${KEYS:-}; do
-  at=${k%%:*}; sleep $((at - now)); now=$at; xin key "${k#*:}"
+  at=${k%%:*}; sleep $((at - now)); now=$at
+  # "click" = left mouse button at the window centre (FotG binds fire primary to it).
+  if [ "${k#*:}" = click ]; then xin click $((x + 640)) $((y + 360)); else xin key "${k#*:}"; fi
 done
 wait "$rec"
+for p in "${snaps[@]}"; do wait "$p"; done
 for t in $(seq 1 3 $((secs - 1))); do
   ffmpeg -loglevel error -y -ss "$t" -i "$out/$name.mp4" -frames:v 1 "$out/$name-t$t.png"
 done

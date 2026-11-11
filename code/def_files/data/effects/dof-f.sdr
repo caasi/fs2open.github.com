@@ -1,7 +1,8 @@
-// DoF spike (throwaway). One full-resolution gather pass on the HDR scene colour:
-// circle of confusion (CoC) from linear depth with a thin-lens model, a golden-angle
-// disc of samples, and scatter-as-gather weights (a sample counts when its own CoC
-// reaches the centre pixel).
+// DoF spike (throwaway). Full-resolution gather passes on the HDR scene colour.
+// passMode 0: round 1, one gather with one signed circle of confusion (CoC).
+// passMode 1-4: round 2, near-field CoC: max filter (H, V), then a box blur (H, V).
+// passMode 5: round 2, split gather: far field from the pixel's own CoC, near field from
+//             the dilated near CoC, composited over the far field (or the sharp pixel).
 #ifdef GL_ES
 precision highp float;
 precision highp sampler2D;
@@ -11,8 +12,9 @@ layout(location = 0) out vec4 fragOut0;
 
 in vec4 fragTexCoord;
 
-uniform sampler2D tex;       // HDR scene colour
+uniform sampler2D tex;       // HDR scene colour (a mip-mapped copy when lod > 0)
 uniform sampler2D depth_tex; // scene depth, standard [0,1] perspective depth
+uniform sampler2D aux_tex;   // passes 2-5: the near-CoC chain (R channel, pixels)
 
 layout(std140) uniform genericData {
 	vec2 focusUV;     // when x >= 0: focus = depth under this screen point (autofocus on the GPU)
@@ -25,12 +27,22 @@ layout(std140) uniform genericData {
 	float zFar;
 
 	float skyBlur;    // scale of the CoC of pixels with no depth (background, starfield)
-	float debugMode;  // 1 = show CoC: red behind focus, green in front
-	float pad0;
+	float debugMode;  // 1 = signed CoC (red behind, green in front); 2 = near alpha (R) / dilated near CoC (G);
+	                  // 3 = colour of sky-depth pixels x4; 4 = colour of far-layer pixels x4
+	float split;
+	float karis;
+
+	float passMode;
+	float samples;
+	float lod;
+	float nearBlur;
+
+	float focusNear;  // when > 0: sharp band [focusNear, focusFar] in view z (bounding box of the target)
+	float focusFar;
+	float snap;       // 1 = sample colour and depth at texel centres (no bilinear colour leak across a depth edge)
 	float pad1;
 };
 
-const int SAMPLES = 64;
 const float GOLDEN_ANGLE = 2.39996323;
 
 float linear_z(float d)
@@ -38,51 +50,199 @@ float linear_z(float d)
 	return 2.0 * zNear * zFar / (zFar + zNear - (2.0 * d - 1.0) * (zFar - zNear));
 }
 
+float focus_z()
+{
+	return focusUV.x >= 0.0 ? linear_z(texture(depth_tex, focusUV).x) : focusDist;
+}
+
 // Signed CoC in pixels: > 0 behind the focus plane, < 0 in front of it.
 float coc_of(float d, float F)
 {
 	float z = linear_z(d);
-	// Thin lens: CoC ~ |1 - F/z|. Subtracting R/(2F) gives a sharp band about R wide.
-	float c = max(0.0, abs(1.0 - F / z) - 0.5 * focusRange / F) * aperture;
-	c = min(c, maxBlur);
+	float c;
+	bool front;
+	if (focusNear > 0.0) {
+		front = z < focusNear;
+		c = front ? focusNear / z - 1.0 : max(0.0, 1.0 - focusFar / z);
+	} else {
+		// Thin lens: CoC ~ |1 - F/z|. Subtracting R/(2F) gives a sharp band about R wide.
+		front = z < F;
+		c = max(0.0, abs(1.0 - F / z) - 0.5 * focusRange / F);
+	}
+	c = min(c * aperture, maxBlur);
 	if (d >= 1.0) {
 		c *= skyBlur;
 	}
-	return z < F ? -c : c;
+	return front ? -c : c;
+}
+
+// Karis average: a single very bright pixel (a star) gets a small weight, so it cannot
+// print the sample pattern. It also dims real highlights (engine glows) in the blur.
+float kw(vec3 c)
+{
+	return karis > 0.5 ? 1.0 / (1.0 + dot(c, vec3(0.2126, 0.7152, 0.0722))) : 1.0;
+}
+
+vec3 col(vec2 suv)
+{
+	return textureLod(tex, suv, lod).rgb;
+}
+
+vec2 snap_uv(vec2 suv, vec2 texel)
+{
+	return snap > 0.5 ? (floor(suv / texel) + 0.5) * texel : suv;
+}
+
+// Golden-angle disc scaled to radius; returns the offset in pixels.
+vec2 disc(int i, int n, float radius)
+{
+	float r = radius * sqrt((float(i) + 0.5) / float(n));
+	float a = float(i) * GOLDEN_ANGLE;
+	return vec2(cos(a), sin(a)) * r;
 }
 
 void main()
 {
 	vec2 uv = fragTexCoord.xy;
-	vec2 texel = 1.0 / vec2(textureSize(tex, 0));
-	float F = focusUV.x >= 0.0 ? linear_z(texture(depth_tex, focusUV).x) : focusDist;
+	vec2 texel = 1.0 / vec2(textureSize(depth_tex, 0));
+	int mode = int(passMode + 0.5);
+	int N = int(samples + 0.5);
 
-	float d0 = texture(depth_tex, uv).x;
-	float z0 = linear_z(d0);
-	float c0 = abs(coc_of(d0, F));
-
-	if (debugMode > 0.5) {
-		float s = coc_of(d0, F) / maxBlur;
-		fragOut0 = vec4(max(s, 0.0), max(-s, 0.0), 0.0, 1.0) + 0.25 * texture(tex, uv);
+	if (mode >= 1 && mode <= 4) {
+		bool horiz = (mode == 1 || mode == 3);
+		vec2 dir = horiz ? vec2(texel.x, 0.0) : vec2(0.0, texel.y);
+		if (mode <= 2) {
+			// ponytail: square max filter (separable) dilates diagonals by up to sqrt(2); a disc needs a 2D pass.
+			int R = int(ceil(maxBlur));
+			float m = 0.0;
+			float F = focus_z();
+			for (int k = -R; k <= R; k++) {
+				vec2 suv = uv + float(k) * dir;
+				float v = mode == 1 ? max(-coc_of(texture(depth_tex, suv).x, F), 0.0) : texture(aux_tex, suv).r;
+				m = max(m, v);
+			}
+			fragOut0 = vec4(m, 0.0, 0.0, 1.0);
+		} else {
+			int R = int(nearBlur + 0.5);
+			float s = 0.0;
+			for (int k = -R; k <= R; k++) {
+				s += texture(aux_tex, uv + float(k) * dir).r;
+			}
+			fragOut0 = vec4(s / float(2 * R + 1), 0.0, 0.0, 1.0);
+		}
 		return;
 	}
 
-	vec3 sum = texture(tex, uv).rgb;
-	float wsum = 1.0;
-	for (int i = 1; i < SAMPLES; i++) {
-		float r = maxBlur * sqrt(float(i) / float(SAMPLES));
-		float a = float(i) * GOLDEN_ANGLE;
-		vec2 suv = uv + vec2(cos(a), sin(a)) * r * texel;
-		float ds = texture(depth_tex, suv).x;
-		float cs = abs(coc_of(ds, F));
-		// A sample behind the centre may not spread over a sharper centre: this keeps
-		// the edge of an in-focus foreground ship from taking a halo of the background.
-		if (linear_z(ds) > z0) {
-			cs = min(cs, c0);
-		}
-		float w = clamp(cs - r + 1.0, 0.0, 1.0);
-		sum += texture(tex, suv).rgb * w;
-		wsum += w;
+	float F = focus_z();
+	float d0 = texture(depth_tex, uv).x;
+	float z0 = linear_z(d0);
+	float s0 = coc_of(d0, F);
+	float c0 = abs(s0);
+	vec3 centre = textureLod(tex, uv, 0.0).rgb;
+
+	if (debugMode > 0.5 && debugMode < 1.5) {
+		float s = s0 / maxBlur;
+		fragOut0 = vec4(max(s, 0.0), max(-s, 0.0), 0.0, 1.0) + 0.25 * vec4(centre, 0.0);
+		return;
 	}
-	fragOut0 = vec4(sum / wsum, 1.0);
+
+	if (debugMode > 2.5) {
+		// 3: the colour of pixels whose depth is "no depth" (sky), x4; black elsewhere.
+		// 4: the colour of every pixel with a far CoC above 1 px (the far layer); black elsewhere.
+		bool far = debugMode > 3.5 ? s0 > 1.0 : d0 >= 1.0;
+		fragOut0 = vec4(far ? 4.0 * centre : vec3(0.0), 1.0);
+		return;
+	}
+
+	if (mode == 0) {
+		// Round 1 unchanged, plus the Karis weight and the colour lod for comparison.
+		float k0 = kw(centre);
+		vec3 sum = centre * k0;
+		float wsum = k0;
+		for (int i = 1; i < N; i++) {
+			float r = maxBlur * sqrt(float(i) / float(N));
+			float a = float(i) * GOLDEN_ANGLE;
+			vec2 suv = snap_uv(uv + vec2(cos(a), sin(a)) * r * texel, texel);
+			float ds = texture(depth_tex, suv).x;
+			float cs = abs(coc_of(ds, F));
+			// A sample behind the centre may not spread over a sharper centre: this keeps
+			// the edge of an in-focus foreground ship from taking a halo of the background.
+			if (linear_z(ds) > z0) {
+				cs = min(cs, c0);
+			}
+			vec3 c = col(suv);
+			float w = clamp(cs - r + 1.0, 0.0, 1.0) * kw(c);
+			sum += c * w;
+			wsum += w;
+		}
+		fragOut0 = vec4(sum / wsum, 1.0);
+		return;
+	}
+
+	// mode 5: split gather.
+	// Far field: only samples behind focus, disc scaled to the centre's own CoC.
+	vec3 base = centre;
+	float rf = max(s0, 0.0);
+	if (rf >= 0.5) {
+		float k0 = kw(centre);
+		vec3 sum = centre * k0;
+		float wsum = k0;
+		for (int i = 0; i < N; i++) {
+			vec2 o = disc(i, N, rf);
+			vec2 suv = snap_uv(uv + o * texel, texel);
+			float cs = coc_of(texture(depth_tex, suv).x, F);
+			if (cs <= 0.0) {
+				continue; // in focus or near: never part of the far layer
+			}
+			vec3 c = col(suv);
+			float w = clamp(cs - length(o) + 1.0, 0.0, 1.0) * kw(c);
+			sum += c * w;
+			wsum += w;
+		}
+		base = sum / wsum;
+	}
+
+	// Near field: radius = dilated near CoC, so a blurred near object reaches out over
+	// sharp or far pixels. Each near sample spreads its colour over pi*cs^2 pixels;
+	// each of the N samples stands for pi*rn^2/N pixels of the disc.
+	float rn = texture(aux_tex, uv).r;
+	float alpha = 0.0;
+	if (rn >= 0.5) {
+		vec3 nsum = vec3(0.0);
+		float nw = 0.0;
+		float cover = 0.0;
+		vec3 bsum = vec3(0.0);
+		float bw = 0.0;
+		for (int i = 0; i < N; i++) {
+			vec2 o = disc(i, N, rn);
+			vec2 suv = snap_uv(uv + o * texel, texel);
+			float cs = -coc_of(texture(depth_tex, suv).x, F);
+			if (cs <= 0.0) {
+				bsum += col(suv);
+				bw += 1.0;
+				continue;
+			}
+			float a = max(cs, 1.0);
+			float cov = clamp(cs - length(o) + 1.0, 0.0, 1.0) * (rn * rn) / (a * a);
+			vec3 c = col(suv);
+			cover += cov;
+			nsum += c * cov * kw(c);
+			nw += cov * kw(c);
+		}
+		alpha = clamp(cover / float(N), 0.0, 1.0);
+		// A near pixel hides what is behind it. Where its blur is part transparent, show the
+		// non-near pixels around it (a blurred guess of the background), not its own sharp colour.
+		if (s0 < 0.0 && nw > 0.0) {
+			base = bw > 0.0 ? bsum / bw : nsum / nw;
+		}
+		if (nw > 0.0) {
+			base = mix(base, nsum / nw, alpha);
+		}
+	}
+
+	if (debugMode > 1.5) {
+		fragOut0 = vec4(alpha, rn / maxBlur, 0.0, 1.0) + 0.25 * vec4(centre, 0.0);
+		return;
+	}
+	fragOut0 = vec4(base, 1.0);
 }

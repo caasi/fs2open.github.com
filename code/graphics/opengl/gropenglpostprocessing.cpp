@@ -276,26 +276,75 @@ static void opengl_dof_report_timer(GLuint query)
 	}
 }
 
+// FSO_DOF_BBOX=1 with FSO_DOF_FOCUS=target: the sharp band is the view-z extent of the
+// target's model bounding box (as Unity HDRP "Manual Ranges" sets near and far directly).
+static bool dof_target_band(float* zmin, float* zmax)
+{
+	static const bool on = dof_env("FSO_DOF_BBOX", 0.0f) > 0.5f;
+	if (!on || Player_ai == nullptr || Player_ai->target_objnum < 0) {
+		return false;
+	}
+	const object* obj = &Objects[Player_ai->target_objnum];
+	if (obj->type != OBJ_SHIP) {
+		return false;
+	}
+	const polymodel* pm = model_get(Ship_info[Ships[obj->instance].ship_info_index].model_num);
+	*zmin = FLT_MAX;
+	*zmax = -FLT_MAX;
+	for (const vec3d& corner : pm->bounding_box) {
+		vec3d world, to;
+		vm_vec_unrotate(&world, &corner, &obj->orient);
+		vm_vec_add2(&world, &obj->pos);
+		vm_vec_sub(&to, &world, &Eye_position);
+		const float z = vm_vec_dot(&to, &Eye_matrix.vec.fvec);
+		*zmin = MIN(*zmin, z);
+		*zmax = MAX(*zmax, z);
+	}
+	*zmin = MAX(*zmin, 1.0f);
+	*zmax = MAX(*zmax, *zmin);
+	return true;
+}
+
+static GLuint dof_make_tex(GLenum fmt, GLenum format, const char* label)
+{
+	GLuint t;
+	glGenTextures(1, &t);
+	GL_state.Texture.SetActiveUnit(0);
+	GL_state.Texture.SetTarget(GL_TEXTURE_2D);
+	GL_state.Texture.Enable(t);
+	glTexImage2D(GL_TEXTURE_2D, 0, fmt, Scene_texture_width, Scene_texture_height, 0, format, GL_FLOAT, nullptr);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+	opengl_set_object_label(GL_TEXTURE, t, label);
+	return t;
+}
+
+static GLuint Dof_near[2] = {0, 0};
+static GLuint Dof_src = 0;
+
 static void opengl_dof_pass()
 {
 	GR_DEBUG_SCOPE("DoF spike");
 
+	static const bool split = dof_env("FSO_DOF_SPLIT", 0.0f) > 0.5f;
+	static const float lod = dof_env("FSO_DOF_LOD", 0.0f);
+
 	if (Dof_fbo == 0) {
 		// ponytail: sized once at first use; a resolution change needs a restart.
 		glGenFramebuffers(1, &Dof_fbo);
-		glGenTextures(1, &Dof_tex);
-		GL_state.Texture.SetActiveUnit(0);
-		GL_state.Texture.SetTarget(GL_TEXTURE_2D);
-		GL_state.Texture.Enable(Dof_tex);
-		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, Scene_texture_width, Scene_texture_height, 0, GL_RGBA, GL_FLOAT, nullptr);
-		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-		opengl_set_object_label(GL_TEXTURE, Dof_tex, "DoF spike texture");
+		Dof_tex = dof_make_tex(GL_RGBA16F, GL_RGBA, "DoF spike texture");
+		Dof_near[0] = dof_make_tex(GL_R16F, GL_RED, "DoF spike near CoC A");
+		Dof_near[1] = dof_make_tex(GL_R16F, GL_RED, "DoF spike near CoC B");
+		if (lod > 0.0f) {
+			Dof_src = dof_make_tex(GL_RGBA16F, GL_RGBA, "DoF spike mip source");
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+			glGenerateMipmap(GL_TEXTURE_2D);
+		}
 		opengl_set_object_label(GL_FRAMEBUFFER, Dof_fbo, "DoF spike framebuffer");
 		glGenQueries(2, Dof_timer);
-		mprintf(("DoF spike: %dx%d RGBA16F\n", Scene_texture_width, Scene_texture_height));
+		mprintf(("DoF spike: %dx%d RGBA16F, split %d, lod %.1f\n", Scene_texture_width, Scene_texture_height, split, lod));
 	}
 
 	// Two queries in flight: read the one from two frames ago without a stall.
@@ -306,35 +355,73 @@ static void opengl_dof_pass()
 	glBeginQuery(GL_TIME_ELAPSED, query);
 
 	GL_state.BindFrameBuffer(Dof_fbo);
-	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, Dof_tex, 0);
 	glViewport(0, 0, Scene_texture_width, Scene_texture_height);
 	GL_state.SetAlphaBlendMode(ALPHA_BLEND_NONE);
 
-	opengl_shader_set_current(gr_opengl_maybe_create_shader(SDR_TYPE_DOF, 0));
-	Current_shader->program->Uniforms.setTextureUniform("tex", 0);
-	Current_shader->program->Uniforms.setTextureUniform("depth_tex", 1);
-	GL_state.Texture.Enable(0, GL_TEXTURE_2D, Scene_color_texture);
-	GL_state.Texture.Enable(1, GL_TEXTURE_2D, Scene_depth_texture);
-
 	const float focus = dof_focus_distance();
-	opengl_set_generic_uniform_data<graphics::generic_data::dof_data>([&](graphics::generic_data::dof_data* data) {
-		// FSO_DOF_FOCUS_UV="u v" focuses on the depth under that screen point (0.5 0.5 = centre).
-		static const char* uv = getenv("FSO_DOF_FOCUS_UV");
-		data->focusU = -1.0f;
-		data->focusV = -1.0f;
-		if (uv != nullptr) {
-			sscanf(uv, "%f %f", &data->focusU, &data->focusV);
-		}
-		data->focusDist = focus;
-		data->focusRange = dof_env("FSO_DOF_RANGE", 0.0f);
-		data->aperture = dof_env("FSO_DOF_APERTURE", 8.0f);
-		data->maxBlur = dof_env("FSO_DOF_MAXBLUR", 12.0f);
-		data->zNear = Min_draw_distance;
-		data->zFar = Max_draw_distance;
-		data->skyBlur = dof_env("FSO_DOF_SKY", 1.0f);
-		data->debugMode = dof_env("FSO_DOF_DEBUG", 0.0f);
-	});
-	opengl_draw_full_screen_textured(0.0f, 0.0f, 1.0f, 1.0f);
+	float band_near = 0.0f, band_far = 0.0f;
+	const bool band = dof_target_band(&band_near, &band_far);
+
+	GLuint colour = Scene_color_texture;
+	if (Dof_src != 0) {
+		// Pre-filtered source: a box-filtered mip chain of the scene colour.
+		glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, Dof_src, 0);
+		opengl_shader_set_current(gr_opengl_maybe_create_shader(SDR_TYPE_COPY, 0));
+		Current_shader->program->Uniforms.setTextureUniform("tex", 0);
+		GL_state.Texture.Enable(0, GL_TEXTURE_2D, Scene_color_texture);
+		opengl_draw_full_screen_textured(0.0f, 0.0f, 1.0f, 1.0f);
+		GL_state.Texture.Enable(0, GL_TEXTURE_2D, Dof_src);
+		glGenerateMipmap(GL_TEXTURE_2D);
+		colour = Dof_src;
+	}
+
+	auto run = [&](int mode, GLuint target, GLuint aux) {
+		glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, target, 0);
+		opengl_shader_set_current(gr_opengl_maybe_create_shader(SDR_TYPE_DOF, 0));
+		Current_shader->program->Uniforms.setTextureUniform("tex", 0);
+		Current_shader->program->Uniforms.setTextureUniform("depth_tex", 1);
+		Current_shader->program->Uniforms.setTextureUniform("aux_tex", 2);
+		GL_state.Texture.Enable(0, GL_TEXTURE_2D, colour);
+		GL_state.Texture.Enable(1, GL_TEXTURE_2D, Scene_depth_texture);
+		GL_state.Texture.Enable(2, GL_TEXTURE_2D, aux);
+		opengl_set_generic_uniform_data<graphics::generic_data::dof_data>([&](graphics::generic_data::dof_data* data) {
+			// FSO_DOF_FOCUS_UV="u v" focuses on the depth under that screen point (0.5 0.5 = centre).
+			static const char* uv = getenv("FSO_DOF_FOCUS_UV");
+			data->focusU = -1.0f;
+			data->focusV = -1.0f;
+			if (uv != nullptr) {
+				sscanf(uv, "%f %f", &data->focusU, &data->focusV);
+			}
+			data->focusDist = focus;
+			data->focusRange = dof_env("FSO_DOF_RANGE", 0.0f);
+			data->aperture = dof_env("FSO_DOF_APERTURE", 8.0f);
+			data->maxBlur = dof_env("FSO_DOF_MAXBLUR", 12.0f);
+			data->zNear = Min_draw_distance;
+			data->zFar = Max_draw_distance;
+			data->skyBlur = dof_env("FSO_DOF_SKY", 1.0f);
+			data->debugMode = dof_env("FSO_DOF_DEBUG", 0.0f);
+			data->split = split ? 1.0f : 0.0f;
+			data->karis = dof_env("FSO_DOF_KARIS", 0.0f);
+			data->passMode = (float)mode;
+			data->samples = dof_env("FSO_DOF_SAMPLES", 64.0f);
+			data->lod = lod;
+			data->nearBlur = dof_env("FSO_DOF_NEARBLUR", 6.0f);
+			data->focusNear = band ? band_near : 0.0f;
+			data->focusFar = band ? band_far : 0.0f;
+			data->snap = dof_env("FSO_DOF_SNAP", 0.0f);
+		});
+		opengl_draw_full_screen_textured(0.0f, 0.0f, 1.0f, 1.0f);
+	};
+
+	if (split) {
+		run(1, Dof_near[0], 0);            // near CoC from depth, max over x
+		run(2, Dof_near[1], Dof_near[0]);  // max over y
+		run(3, Dof_near[0], Dof_near[1]);  // box blur x
+		run(4, Dof_near[1], Dof_near[0]);  // box blur y
+		run(5, Dof_tex, Dof_near[1]);      // split gather
+	} else {
+		run(0, Dof_tex, 0);
+	}
 
 	// Copy back, so bloom, tonemapping and AA run on the blurred scene unchanged.
 	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, Scene_color_texture, 0);
@@ -347,7 +434,11 @@ static void opengl_dof_pass()
 
 	glEndQuery(GL_TIME_ELAPSED);
 	if (Dof_frame % 300 == 150) {
-		mprintf(("DoF spike: frame %d, focus %.1f m\n", Dof_frame, focus));
+		if (band) {
+			mprintf(("DoF spike: frame %d, focus %.1f m, band %.1f..%.1f m\n", Dof_frame, focus, band_near, band_far));
+		} else {
+			mprintf(("DoF spike: frame %d, focus %.1f m\n", Dof_frame, focus));
+		}
 	}
 	Dof_frame++;
 
