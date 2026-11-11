@@ -1,0 +1,9 @@
+; Scale spike: retail (FS2 demo) motion debris, used only when FSO_DUST=SpikeDust.
+#Motion Debris
+$Motion Debris Name: SpikeDust
+    +Bitmap: debris01
+    +Bitmap: debris02
+    +Bitmap: debris03
+    +Bitmap: debris04
+#End
+#End
