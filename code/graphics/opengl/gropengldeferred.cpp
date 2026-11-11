@@ -8,6 +8,7 @@
 #include "gropenglstate.h"
 #include "gropengltnl.h"
 
+#include "cmdline/cmdline.h"
 #include "graphics/2d.h"
 #include "graphics/light.h"
 #include "graphics/matrix.h"
@@ -216,6 +217,149 @@ prepare_light_uniforms(light& l, graphics::util::UniformAligner& uniformAligner,
 	return light_data;
 }
 
+// ---- SSAO spike (throwaway) -------------------------------------------------
+// Half-resolution GTAO from the position and normal G-buffers (ssao-f.sdr), a
+// depth-aware blur, then deferred-f.sdr (variant SSAO) multiplies the ambient
+// term by the result. Direct light is untouched.
+static GLuint Ssao_fbo = 0;
+static GLuint Ssao_tex[2] = {0, 0};
+static int Ssao_width = 0;
+static int Ssao_height = 0;
+static GLuint Ssao_timer[2] = {0, 0};
+static int Ssao_frame = 0;
+
+static void opengl_ssao_setup()
+{
+	// ponytail: sized once at first use; a resolution change needs a restart.
+	Ssao_width = Scene_texture_width / 2;
+	Ssao_height = Scene_texture_height / 2;
+
+	glGenFramebuffers(1, &Ssao_fbo);
+	glGenTextures(2, Ssao_tex);
+	for (auto tex : Ssao_tex) {
+		GL_state.Texture.SetActiveUnit(0);
+		GL_state.Texture.SetTarget(GL_TEXTURE_2D);
+		GL_state.Texture.Enable(tex);
+		glTexImage2D(GL_TEXTURE_2D, 0, GL_R8, Ssao_width, Ssao_height, 0, GL_RED, GL_UNSIGNED_BYTE, nullptr);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+	}
+	opengl_set_object_label(GL_TEXTURE, Ssao_tex[0], "SSAO spike texture 0");
+	opengl_set_object_label(GL_TEXTURE, Ssao_tex[1], "SSAO spike texture 1");
+	opengl_set_object_label(GL_FRAMEBUFFER, Ssao_fbo, "SSAO spike framebuffer");
+
+	glGenQueries(2, Ssao_timer);
+
+	mprintf(("SSAO spike: %dx%d, two R8 textures, %d bytes of VRAM\n", Ssao_width, Ssao_height, 2 * Ssao_width * Ssao_height));
+}
+
+static void opengl_ssao_report_timer(GLuint query)
+{
+	static GLuint64 sum_ns = 0, min_ns = ~GLuint64(0), max_ns = 0;
+	static int samples = 0;
+
+	GLuint available = 0;
+	glGetQueryObjectuiv(query, GL_QUERY_RESULT_AVAILABLE, &available);
+	if (!available) {
+		return;
+	}
+	GLuint64 ns = 0;
+	glGetQueryObjectui64v(query, GL_QUERY_RESULT, &ns);
+	sum_ns += ns;
+	min_ns = MIN(min_ns, ns);
+	max_ns = MAX(max_ns, ns);
+	if (++samples == 300) {
+		mprintf(("SSAO spike: GPU time over %d frames: avg %.3f ms, min %.3f ms, max %.3f ms\n", samples,
+			sum_ns / samples / 1e6, min_ns / 1e6, max_ns / 1e6));
+		sum_ns = 0; min_ns = ~GLuint64(0); max_ns = 0; samples = 0;
+	}
+}
+
+static void opengl_ssao_pass()
+{
+	GR_DEBUG_SCOPE("SSAO spike");
+
+	if (Ssao_fbo == 0) {
+		opengl_ssao_setup();
+	}
+
+	// Two queries in flight: read the one from two frames ago without a stall.
+	GLuint query = Ssao_timer[Ssao_frame & 1];
+	if (Ssao_frame >= 2) {
+		opengl_ssao_report_timer(query);
+	}
+	glBeginQuery(GL_TIME_ELAPSED, query);
+
+	GL_state.BindFrameBuffer(Ssao_fbo);
+	glViewport(0, 0, Ssao_width, Ssao_height);
+	GL_state.SetAlphaBlendMode(ALPHA_BLEND_NONE);
+	GL_state.SetZbufferType(ZBUFFER_TYPE_NONE);
+	GL_state.ColorMask(true, true, true, true);
+
+	opengl_set_generic_uniform_data<graphics::generic_data::ssao_data>([](graphics::generic_data::ssao_data* data) {
+		data->projMatrix = gr_projection_matrix;
+		// Spike only: FSO_SSAO_RADIUS / FSO_SSAO_POWER override the defaults to test scene scale.
+		static const float radius = getenv("FSO_SSAO_RADIUS") ? (float)atof(getenv("FSO_SSAO_RADIUS")) : 4.0f;
+		static const float power = getenv("FSO_SSAO_POWER") ? (float)atof(getenv("FSO_SSAO_POWER")) : 1.5f;
+		data->radius = radius;
+		data->power = power;
+		data->maxPixelRadius = 96.0f;
+		static const char* dbg = getenv("FSO_SSAO_DEBUG");
+		data->debugMode = (dbg != nullptr && atoi(dbg) == 2) ? 2.0f : 0.0f;
+	});
+
+	struct ssao_step { int flags; GLuint input; GLuint output; };
+	const ssao_step steps[] = {
+		{0, 0, Ssao_tex[0]},
+		{SDR_FLAG_SSAO_BLUR_H, Ssao_tex[0], Ssao_tex[1]},
+		{SDR_FLAG_SSAO_BLUR_V, Ssao_tex[1], Ssao_tex[0]},
+	};
+	for (const auto& step : steps) {
+		opengl_shader_set_current(gr_opengl_maybe_create_shader(SDR_TYPE_SSAO, step.flags));
+		Current_shader->program->Uniforms.setTextureUniform("PositionBuffer", 0);
+		GL_state.Texture.Enable(0, GL_TEXTURE_2D, Scene_position_texture);
+		if (step.input == 0) {
+			Current_shader->program->Uniforms.setTextureUniform("NormalBuffer", 1);
+			GL_state.Texture.Enable(1, GL_TEXTURE_2D, Scene_normal_texture);
+		} else {
+			Current_shader->program->Uniforms.setTextureUniform("AOInput", 2);
+			GL_state.Texture.Enable(2, GL_TEXTURE_2D, step.input);
+		}
+		glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, step.output, 0);
+		opengl_draw_full_screen_textured(0.0f, 0.0f, 1.0f, 1.0f);
+	}
+
+	glEndQuery(GL_TIME_ELAPSED);
+
+	// Spike only: FSO_SSAO_DUMP=<path> writes the blurred AO buffer as a PGM every 300 frames
+	// and logs its mean, so AO can be checked without the tonemapped debug view.
+	if (const char* dump = getenv("FSO_SSAO_DUMP"); dump != nullptr && Ssao_frame % 300 == 150) {
+		SCP_vector<GLubyte> px(Ssao_width * Ssao_height);
+		glPixelStorei(GL_PACK_ALIGNMENT, 1);
+		GL_state.Texture.Enable(0, GL_TEXTURE_2D, Ssao_tex[0]);
+		glGetTexImage(GL_TEXTURE_2D, 0, GL_RED, GL_UNSIGNED_BYTE, px.data());
+		double sum = 0;
+		int dark = 0;
+		for (auto v : px) { sum += v; dark += v < 230; }
+		mprintf(("SSAO spike: AO buffer frame %d: mean %.3f, %.2f%% of pixels below 0.9\n", Ssao_frame,
+			sum / px.size() / 255.0, 100.0 * dark / px.size()));
+		SCP_string path = SCP_string(dump) + "_" + std::to_string(Ssao_frame) + ".pgm";
+		if (FILE* f = fopen(path.c_str(), "wb")) {
+			fprintf(f, "P5\n%d %d\n255\n", Ssao_width, Ssao_height);
+			fwrite(px.data(), 1, px.size(), f);
+			fclose(f);
+		}
+	}
+	Ssao_frame++;
+
+	GL_state.BindFrameBuffer(Scene_framebuffer);
+	glViewport(0, 0, gr_screen.max_w, gr_screen.max_h);
+	GL_state.ColorMask(true, true, true, false);
+}
+// ---- end SSAO spike ---------------------------------------------------------
+
 void gr_opengl_deferred_lighting_finish()
 {
 	GR_DEBUG_SCOPE("Deferred lighting finish");
@@ -225,13 +369,20 @@ void gr_opengl_deferred_lighting_finish()
 		return;
 	}
 
+	if (Cmdline_ssao_spike) {
+		opengl_ssao_pass();
+	}
+
 	GL_state.SetAlphaBlendMode(ALPHA_BLEND_ADDITIVE);
 	gr_zbuffer_set(GR_ZBUFF_NONE);
 
 	// GL_state.DepthFunc(GL_GREATER);
 	// GL_state.DepthMask(GL_FALSE);
 
-	opengl_shader_set_current(gr_opengl_maybe_create_shader(SDR_TYPE_DEFERRED_LIGHTING, ENVMAP > 0 ? SDR_FLAG_ENV_MAP : 0));
+	const int deferred_flags = (ENVMAP > 0 ? SDR_FLAG_ENV_MAP : 0) | (Cmdline_ssao_spike ? SDR_FLAG_DEFERRED_SSAO : 0)
+		// Spike only: FSO_SSAO_ALL=1 lets AO darken every light term, not just ambient.
+		| (Cmdline_ssao_spike && getenv("FSO_SSAO_ALL") ? SDR_FLAG_DEFERRED_SSAO_ALL : 0);
+	opengl_shader_set_current(gr_opengl_maybe_create_shader(SDR_TYPE_DEFERRED_LIGHTING, deferred_flags));
 	
 	// Render on top of the composite buffer texture
 	glDrawBuffer(GL_COLOR_ATTACHMENT5);
@@ -253,6 +404,10 @@ void gr_opengl_deferred_lighting_finish()
 	GL_state.Texture.Enable(3, GL_TEXTURE_2D, Scene_specular_texture);
 	if (Shadow_quality != ShadowQuality::Disabled) {
 		GL_state.Texture.Enable(4, GL_TEXTURE_2D_ARRAY, Shadow_map_depth_texture);
+	}
+	if (Cmdline_ssao_spike) {
+		Current_shader->program->Uniforms.setTextureUniform("AOBuffer", 7);
+		GL_state.Texture.Enable(7, GL_TEXTURE_2D, Ssao_tex[0]);
 	}
 
 	if (ENVMAP > 0) {
@@ -675,6 +830,16 @@ void gr_opengl_deferred_lighting_finish()
 						  GL_COLOR_BUFFER_BIT,
 						  GL_NEAREST);
 		glReadBuffer(GL_COLOR_ATTACHMENT0);
+	}
+
+	if (Cmdline_ssao_spike && getenv("FSO_SSAO_DEBUG") != nullptr) {
+		// Spike debug view: the blurred AO buffer (red channel) in place of the lit scene.
+		GL_state.SetAlphaBlendMode(ALPHA_BLEND_NONE);
+		gr_zbuffer_set(GR_ZBUFF_NONE);
+		opengl_shader_set_current(gr_opengl_maybe_create_shader(SDR_TYPE_COPY, 0));
+		Current_shader->program->Uniforms.setTextureUniform("tex", 0);
+		GL_state.Texture.Enable(0, GL_TEXTURE_2D, Ssao_tex[0]);
+		opengl_draw_full_screen_textured(0.0f, 0.0f, 1.0f, 1.0f);
 	}
 
 	gr_set_proj_matrix(Proj_fov, gr_screen.clip_aspect, Min_draw_distance, Max_draw_distance);

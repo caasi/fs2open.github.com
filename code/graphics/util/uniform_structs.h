@@ -407,6 +407,15 @@ struct dof_data {
 	float pad;
 };
 
+struct ssao_data {
+	matrix4 projMatrix;
+
+	float radius;
+	float power;
+	float maxPixelRadius;
+	float debugMode;
+};
+
 struct blur_data {
 	float texSize;
 	int level;
