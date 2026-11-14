@@ -110,12 +110,12 @@ int dof_samples(DofQuality quality)
 	return DOF_MAX_SAMPLES * (level + 1) / 3;
 }
 
-int dof_pick_focus(const SCP_vector<dof_candidate>& candidates)
+int dof_pick_focus(const SCP_vector<dof_candidate>& candidates, float zfar)
 {
 	int best = -1;
 	for (int i = 0; i < static_cast<int>(candidates.size()); i++) {
 		const auto& c = candidates[i];
-		if (c.radius < DOF_FOCUS_MIN_RADIUS || c.zmax <= 0.0f || !c.in_view || c.cloaked) {
+		if (c.radius < DOF_FOCUS_MIN_RADIUS || c.zmax <= 0.0f || c.zmin > zfar || !c.in_view || c.cloaked) {
 			continue;
 		}
 		if (best < 0 || c.surface_dist < candidates[best].surface_dist) {
@@ -201,11 +201,12 @@ bool dof_get_frame(dof_frame* out)
 		vm_vec_rotate(&view, &to, &Eye_matrix);
 		const bool in_view = !symmetric_fov || dof_sphere_in_view(view, o->radius, tan_half_fov_y, gr_screen.clip_aspect);
 		const bool cloaked = Ships[o->instance].flags[Ship::Ship_Flags::Cloaked];
-		candidates.push_back({vm_vec_dist(&o->pos, &Eye_position) - o->radius, o->radius, zmax, in_view, cloaked});
+		candidates.push_back({vm_vec_dist(&o->pos, &Eye_position) - o->radius, o->radius, zmax, in_view, cloaked, zmin});
 		extents.emplace_back(zmin, zmax);
 	}
 
-	const int focus = dof_pick_focus(candidates);
+	// A ship wholly beyond the far plane is not drawn.
+	const int focus = dof_pick_focus(candidates, Max_draw_distance);
 	if (focus < 0) {
 		return false;
 	}

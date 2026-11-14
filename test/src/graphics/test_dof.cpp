@@ -13,6 +13,9 @@ class Dof : public ::testing::Test {
   protected:
 	void TearDown() override { options::OptionsManager::instance()->clearRequirements(); }
 };
+
+// Far plane for the focus tests: far enough that no test ship is beyond it unless the test says so.
+constexpr float FAR = 1.0e6f;
 } // namespace
 
 TEST_F(Dof, PickFocusTakesNearestLargeShip)
@@ -22,13 +25,13 @@ TEST_F(Dof, PickFocusTakesNearestLargeShip)
 		{900.0f, 800.0f, 3000.0f}, // capital ship
 		{400.0f, 250.0f, 1000.0f}, // corvette, nearest large ship
 	};
-	EXPECT_EQ(dof_pick_focus(c), 2);
+	EXPECT_EQ(dof_pick_focus(c, FAR), 2);
 }
 
 TEST_F(Dof, PickFocusAcceptsExactMinRadius)
 {
 	SCP_vector<dof_candidate> c = {{100.0f, DOF_FOCUS_MIN_RADIUS, 500.0f}};
-	EXPECT_EQ(dof_pick_focus(c), 0);
+	EXPECT_EQ(dof_pick_focus(c, FAR), 0);
 }
 
 TEST_F(Dof, PickFocusSkipsShipBehindEye)
@@ -38,14 +41,14 @@ TEST_F(Dof, PickFocusSkipsShipBehindEye)
 		{10.0f, 500.0f, -20.0f},
 		{2000.0f, 500.0f, 3000.0f},
 	};
-	EXPECT_EQ(dof_pick_focus(c), 1);
+	EXPECT_EQ(dof_pick_focus(c, FAR), 1);
 }
 
 TEST_F(Dof, PickFocusNoneWhenNoLargeShip)
 {
-	EXPECT_EQ(dof_pick_focus({}), -1);
+	EXPECT_EQ(dof_pick_focus({}, FAR), -1);
 	SCP_vector<dof_candidate> c = {{10.0f, 20.0f, 100.0f}};
-	EXPECT_EQ(dof_pick_focus(c), -1);
+	EXPECT_EQ(dof_pick_focus(c, FAR), -1);
 }
 
 TEST_F(Dof, ViewZExtentOfRotatedBox)
@@ -146,7 +149,7 @@ TEST_F(Dof, PickFocusSkipsShipOutsideView)
 		{100.0f, 500.0f, 600.0f, false},
 		{2000.0f, 500.0f, 3000.0f},
 	};
-	EXPECT_EQ(dof_pick_focus(c), 1);
+	EXPECT_EQ(dof_pick_focus(c, FAR), 1);
 }
 
 TEST_F(Dof, PickFocusSkipsCloakedShip)
@@ -155,7 +158,7 @@ TEST_F(Dof, PickFocusSkipsCloakedShip)
 		{100.0f, 500.0f, 600.0f, true, true},
 		{2000.0f, 500.0f, 3000.0f},
 	};
-	EXPECT_EQ(dof_pick_focus(c), 1);
+	EXPECT_EQ(dof_pick_focus(c, FAR), 1);
 }
 
 TEST_F(Dof, SphereInView)
@@ -195,4 +198,16 @@ TEST_F(Dof, QualityOptionExistsAndDefaultsHigh)
 	auto* opt = options::OptionsManager::instance()->getOptionByKey("Graphics.DepthOfFieldQuality");
 	ASSERT_NE(opt, nullptr);
 	EXPECT_EQ(opt->getCurrentValueDescription().serialized, "2");
+}
+
+TEST_F(Dof, PickFocusSkipsShipBeyondFarPlane)
+{
+	// The nearer ship lies wholly beyond the far plane: it is not drawn, so it cannot be the focus.
+	SCP_vector<dof_candidate> c = {
+		{20000.0f, 500.0f, 21000.0f, true, false, 20500.0f},
+		{30000.0f, 500.0f, 31000.0f, true, false, 15000.0f},
+	};
+	EXPECT_EQ(dof_pick_focus(c, 20000.0f), 1);
+	// A ship that only reaches past the far plane still counts.
+	EXPECT_EQ(dof_pick_focus(c, 25000.0f), 0);
 }
