@@ -22,11 +22,11 @@ layout(std140) uniform genericData {
 
 	float zNear;
 	float zFar;
+	float samples;   // gather taps, at most MAX_SAMPLES
 	float pad0;
-	float pad1;
 };
 
-const int SAMPLES = 96;
+const int MAX_SAMPLES = 96; // DOF_MAX_SAMPLES in dof.h
 const float GOLDEN_ANGLE = 2.39996323;
 
 float linear_z(float d)
@@ -71,8 +71,9 @@ void main()
 	// sharp ship keeps a clean edge against a blurred background.
 	vec3 sum = centre;
 	float wsum = 1.0;
-	for (int i = 0; i < SAMPLES; i++) {
-		float r = c0 * sqrt((float(i) + 0.5) / float(SAMPLES));
+	int n = min(int(samples), MAX_SAMPLES);
+	for (int i = 0; i < n; i++) {
+		float r = c0 * sqrt((float(i) + 0.5) / float(n));
 		float a = float(i) * GOLDEN_ANGLE;
 		vec2 o = vec2(cos(a), sin(a)) * r;
 		vec2 suv = snap_uv(uv + o * texel, texel);

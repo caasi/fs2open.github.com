@@ -2,6 +2,7 @@
 
 #include "graphics/dof.h"
 #include "math/vecmat.h"
+#include "options/Option.h"
 #include "options/OptionsManager.h"
 
 using namespace graphics;
@@ -117,7 +118,7 @@ TEST_F(Dof, OptionsExistAndDefaultOff)
 {
 	auto* mgr = options::OptionsManager::instance();
 	for (const char* key : {"Graphics.DepthOfField", "Graphics.DepthOfFieldMaxBlur", "Graphics.DepthOfFieldStart",
-			 "Graphics.DepthOfFieldTail", "Graphics.DepthOfFieldSky"}) {
+			 "Graphics.DepthOfFieldTail", "Graphics.DepthOfFieldSky", "Graphics.DepthOfFieldQuality"}) {
 		EXPECT_NE(mgr->getOptionByKey(key), nullptr) << key;
 	}
 	dof_frame f;
@@ -129,7 +130,7 @@ TEST_F(Dof, EveryOptionRequiresOpenGL)
 	auto* mgr = options::OptionsManager::instance();
 	dof_set_requirements();
 	for (const char* key : {"Graphics.DepthOfField", "Graphics.DepthOfFieldMaxBlur", "Graphics.DepthOfFieldStart",
-			 "Graphics.DepthOfFieldTail", "Graphics.DepthOfFieldSky"}) {
+			 "Graphics.DepthOfFieldTail", "Graphics.DepthOfFieldSky", "Graphics.DepthOfFieldQuality"}) {
 		auto requirement = mgr->getRequirement(key);
 		ASSERT_TRUE(requirement.has_value()) << key;
 		EXPECT_EQ(requirement->first, "opengl") << key;
@@ -173,4 +174,25 @@ TEST_F(Dof, SphereInView)
 	EXPECT_TRUE(dof_sphere_in_view(vm_vec_new(1900.0f, 0.0f, 1000.0f), 200.0f, t, aspect));
 	// Above the top edge (y = z): x would still be inside, so the vertical test must catch it.
 	EXPECT_FALSE(dof_sphere_in_view(vm_vec_new(0.0f, 1500.0f, 1000.0f), 100.0f, t, aspect));
+}
+
+TEST_F(Dof, QualityMapsToSampleCount)
+{
+	EXPECT_EQ(dof_samples(DofQuality::Low), 32);
+	EXPECT_EQ(dof_samples(DofQuality::Medium), 64);
+	EXPECT_EQ(dof_samples(DofQuality::High), 96);
+}
+
+TEST_F(Dof, QualityOutOfRangeIsClamped)
+{
+	// A hand-edited config can hold any integer; the shader loop must stay bounded.
+	EXPECT_EQ(dof_samples(static_cast<DofQuality>(-5)), 32);
+	EXPECT_EQ(dof_samples(static_cast<DofQuality>(1000)), DOF_MAX_SAMPLES);
+}
+
+TEST_F(Dof, QualityOptionExistsAndDefaultsHigh)
+{
+	auto* opt = options::OptionsManager::instance()->getOptionByKey("Graphics.DepthOfFieldQuality");
+	ASSERT_NE(opt, nullptr);
+	EXPECT_EQ(opt->getCurrentValueDescription().serialized, "2");
 }

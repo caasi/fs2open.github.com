@@ -10,6 +10,14 @@ namespace graphics {
 
 enum class DofMode { Off = 0, Cutscenes = 1, Always = 2 };
 
+enum class DofQuality { Low = 0, Medium = 1, High = 2 };
+
+// Upper bound of the shader's gather loop; dof_samples() never returns more.
+constexpr int DOF_MAX_SAMPLES = 96;
+
+// Gather taps per pixel for a quality level. Out-of-range values clamp to Low or High.
+int dof_samples(DofQuality quality);
+
 // Only ships at least this large can be the focus ship. Smaller ships are fighters and
 // bombers, which stay sharp because the blur never reaches in front of the focus ship.
 constexpr float DOF_FOCUS_MIN_RADIUS = 200.0f;
@@ -51,6 +59,7 @@ struct dof_frame {
 	dof_band band;
 	float max_blur; // pixels
 	float sky_blur; // scale of max_blur for pixels with no depth
+	int samples;    // gather taps per pixel, at most DOF_MAX_SAMPLES
 };
 
 // False when no blur runs this frame (option off, not a cutscene in Cutscenes mode, or no focus ship).

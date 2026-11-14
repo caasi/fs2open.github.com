@@ -421,7 +421,8 @@ struct dof_data {
 
 	float zNear;
 	float zFar;
-	float pad[2];
+	float samples;
+	float pad;
 };
 
 struct msaa_data {

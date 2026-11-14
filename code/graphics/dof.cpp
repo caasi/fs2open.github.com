@@ -1,5 +1,7 @@
 #include "graphics/dof.h"
 
+#include <algorithm>
+
 #include "globalincs/systemvars.h"
 #include "localization/localize.h"
 #include "math/vecmat.h"
@@ -18,9 +20,10 @@ static int Dof_max_blur = 16;
 static float Dof_start = 0.33f;
 static float Dof_tail = 1.0f;
 static float Dof_sky = 1.0f;
+static DofQuality Dof_quality = DofQuality::High;
 
 static const char* const Dof_option_keys[] = {"Graphics.DepthOfField", "Graphics.DepthOfFieldMaxBlur",
-	"Graphics.DepthOfFieldStart", "Graphics.DepthOfFieldTail", "Graphics.DepthOfFieldSky"};
+	"Graphics.DepthOfFieldStart", "Graphics.DepthOfFieldTail", "Graphics.DepthOfFieldSky", "Graphics.DepthOfFieldQuality"};
 
 // coverity[GLOBAL_INIT_ORDER] -- safe; OptionBuilder::finish() uses Meyers singleton
 static auto DofModeOption __UNUSED = options::OptionBuilder<DofMode>("Graphics.DepthOfField",
@@ -86,6 +89,26 @@ static auto DofSkyOption __UNUSED = options::OptionBuilder<float>("Graphics.Dept
                      .bind_to(&Dof_sky)
                      .importance(50)
                      .finish();
+
+// coverity[GLOBAL_INIT_ORDER] -- safe; OptionBuilder::finish() uses Meyers singleton
+static auto DofQualityOption __UNUSED = options::OptionBuilder<DofQuality>("Graphics.DepthOfFieldQuality",
+                     std::pair<const char*, int>{"Depth of field quality", -1},
+                     std::pair<const char*, int>{"Samples per pixel of the blur. Lower is faster; the blur of single stars shows a pattern of dots", -1})
+                     .category(std::make_pair("Graphics", 1825))
+                     .level(options::ExpertLevel::Advanced)
+                     .values({{DofQuality::Low, {"Low", -1}},
+                              {DofQuality::Medium, {"Medium", -1}},
+                              {DofQuality::High, {"High", -1}}})
+                     .default_val(DofQuality::High)
+                     .bind_to(&Dof_quality)
+                     .importance(49)
+                     .finish();
+
+int dof_samples(DofQuality quality)
+{
+	const int level = std::clamp(static_cast<int>(quality), 0, 2);
+	return DOF_MAX_SAMPLES * (level + 1) / 3;
+}
 
 int dof_pick_focus(const SCP_vector<dof_candidate>& candidates)
 {
@@ -189,6 +212,7 @@ bool dof_get_frame(dof_frame* out)
 	out->band = dof_far_band(extents[focus].first, extents[focus].second, Dof_start, Dof_tail);
 	out->max_blur = static_cast<float>(Dof_max_blur);
 	out->sky_blur = Dof_sky;
+	out->samples = dof_samples(Dof_quality);
 	return true;
 }
 

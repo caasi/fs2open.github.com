@@ -291,6 +291,7 @@ static void opengl_post_pass_dof()
 		data->blurRamp = frame.band.ramp;
 		data->maxBlur = frame.max_blur;
 		data->skyBlur = frame.sky_blur;
+		data->samples = static_cast<float>(frame.samples);
 		data->zNear = Min_draw_distance;
 		data->zFar = Max_draw_distance;
 	});
