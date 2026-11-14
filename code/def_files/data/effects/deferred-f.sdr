@@ -296,13 +296,15 @@ float upsample_gtao(float z)
 		ivec2 t = clamp(base + o, ivec2(0), size - 1);
 		float tzRaw = texelFetch(PositionBuffer, t * 2, 0).z;
 		vec2 b = mix(1.0 - f, f, vec2(o));
-		// An empty texel gets no depth weight; 1e-5 keeps wsum above 0.
 		float dz = tzRaw <= EMPTY_PIXEL_COMPRESSED_Z ? 1e9 : abs(uncompress_depth_value(tzRaw) - z);
-		float w = b.x * b.y * exp(-dz / tolerance) + 1e-5;
+		// The 1e-3 keeps a tap on this surface in play even where its bilinear weight is 0.
+		float w = (b.x * b.y + 1e-3) * exp(-dz / tolerance);
 		sum += texelFetch(AOBuffer, t, 0).r * w;
 		wsum += w;
 	}
-	return sum / wsum;
+	// No tap is on this surface (an object thinner than one AO texel, in front of another
+	// surface). Any AO here would belong to that other surface, so do not darken.
+	return wsum < 1e-4 ? 1.0 : sum / wsum;
 }
 #endif
 
