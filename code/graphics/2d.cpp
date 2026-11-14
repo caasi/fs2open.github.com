@@ -26,6 +26,7 @@
 #include "cmdline/cmdline.h"
 #include "debugconsole/console.h"
 #include "executor/global_executors.h"
+#include "graphics/dof.h"
 #include "graphics/openxr.h"
 #include "graphics/paths/PathRenderer.h"
 #include "graphics/post_processing.h"
@@ -2743,6 +2744,10 @@ bool gr_init(std::unique_ptr<os::GraphicsOperations>&& graphicsOps, GraphicsAPI 
 		options_mgr->removeOption(HDRPeakOption);
 	}
 	shadows_remove_unsupported_options();
+
+	// Depth of field is an OpenGL post-processing pass. Recorded on every renderer, not only where it is unmet,
+	// so that a launcher also sees it; the options dialog greys the options out only on other renderers.
+	graphics::dof_set_requirements();
 
 	if(Cmdline_enable_vr)
 		openxr_init();
