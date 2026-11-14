@@ -263,6 +263,11 @@ static void opengl_gtao_pass()
 		opengl_gtao_setup();
 	}
 
+	// The light passes after this one draw with the viewport that gr_set_proj_matrix() set
+	// (the clip rectangle), so give it back unchanged.
+	GLint viewport[4];
+	glGetIntegerv(GL_VIEWPORT, viewport);
+
 	GL_state.BindFrameBuffer(Gtao_framebuffer);
 	glViewport(0, 0, Gtao_width, Gtao_height);
 	GL_state.SetAlphaBlendMode(ALPHA_BLEND_NONE);
@@ -305,7 +310,7 @@ static void opengl_gtao_pass()
 	}
 
 	GL_state.BindFrameBuffer(Scene_framebuffer);
-	glViewport(0, 0, gr_screen.max_w, gr_screen.max_h);
+	glViewport(viewport[0], viewport[1], viewport[2], viewport[3]);
 	GL_state.ColorMask(true, true, true, false);
 }
 
