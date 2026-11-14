@@ -279,6 +279,22 @@ void OptionsManager::loadInitialValues()
 	}
 }
 
+void OptionsManager::setRequirement(const SCP_string& key, const SCP_string& requirement, const SCP_string& explanation)
+{
+	_requirements[key] = std::make_pair(requirement, explanation);
+}
+
+std::optional<std::pair<SCP_string, SCP_string>> OptionsManager::getRequirement(const SCP_string& key) const
+{
+	auto iter = _requirements.find(key);
+	if (iter == _requirements.end()) {
+		return std::nullopt;
+	}
+	return iter->second;
+}
+
+void OptionsManager::clearRequirements() { _requirements.clear(); }
+
 void OptionsManager::printValues()
 {
 	mprintf(("Printing in-game options values!\n"));

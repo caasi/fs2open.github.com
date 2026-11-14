@@ -35,6 +35,9 @@ class OptionsManager {
 	SCP_unordered_set<SCP_string> _enforcedOptions;
 
 	SCP_vector<std::shared_ptr<const OptionBase>> _options;
+
+	// what a player needs to use an option, and a sentence saying so; same storage as describeOptions() in #7976
+	SCP_unordered_map<SCP_string, std::pair<SCP_string, SCP_string>> _requirements;
 	bool _optionsSorted = false;
 
   public:
@@ -95,6 +98,15 @@ class OptionsManager {
 	void loadInitialValues();
 
 	void printValues();
+
+	// Notes what a player needs to use an option ("vulkan", "raytracing"), for describeOptions()
+	void setRequirement(const SCP_string& key, const SCP_string& requirement, const SCP_string& explanation);
+
+	// The requirement and explanation given to setRequirement() for this key, if any
+	std::optional<std::pair<SCP_string, SCP_string>> getRequirement(const SCP_string& key) const;
+
+	// Removes all requirements. For tests.
+	void clearRequirements();
 
 	void set_ingame_binary_option(SCP_string key, bool value);
 	void set_ingame_multi_option(SCP_string key, int value);

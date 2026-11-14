@@ -38,7 +38,10 @@ void OptUi::build_options_list(const char* category) const
 			// always returns the override, so an edit here would never take effect. Show the control greyed out
 			// with the override source in its tooltip instead of letting the player change a dead value.
 			auto overrideReason = options::OptionsManager::instance()->getOverrideReason(thisOpt->getConfigKey());
-			ImGui::BeginDisabled(overrideReason.has_value());
+			// An option whose requirement the running renderer does not meet is greyed out too.
+			auto requirement = options::OptionsManager::instance()->getRequirement(thisOpt->getConfigKey());
+			const bool requirementUnmet = requirement.has_value() && !gr_option_requirement_met(requirement->first, gr_screen.mode);
+			ImGui::BeginDisabled(overrideReason.has_value() || requirementUnmet);
 
 			// Selectors
 			if (thisOpt->getType() == options::OptionType::Selection) {
@@ -141,6 +144,8 @@ void OptUi::build_options_list(const char* category) const
 				if (overrideReason.has_value()) {
 					ImGui::SetTooltip(XSTR("%s\n\nSet on the command line by %s; it cannot be changed here.", 1934),
 						thisOpt->getDescription().c_str(), overrideReason->c_str());
+				} else if (requirementUnmet) {
+					ImGui::SetTooltip("%s\n\n%s", thisOpt->getDescription().c_str(), requirement->second.c_str());
 				} else {
 					ImGui::SetTooltip("%s", thisOpt->getDescription().c_str());
 				}
