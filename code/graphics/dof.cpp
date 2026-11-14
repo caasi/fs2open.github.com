@@ -92,7 +92,7 @@ int dof_pick_focus(const SCP_vector<dof_candidate>& candidates)
 	int best = -1;
 	for (int i = 0; i < static_cast<int>(candidates.size()); i++) {
 		const auto& c = candidates[i];
-		if (c.radius < DOF_FOCUS_MIN_RADIUS || c.zmax <= 0.0f) {
+		if (c.radius < DOF_FOCUS_MIN_RADIUS || c.zmax <= 0.0f || !c.in_view || c.cloaked) {
 			continue;
 		}
 		if (best < 0 || c.surface_dist < candidates[best].surface_dist) {
@@ -100,6 +100,18 @@ int dof_pick_focus(const SCP_vector<dof_candidate>& candidates)
 		}
 	}
 	return best;
+}
+
+bool dof_sphere_in_view(const vec3d& centre, float radius, float tan_half_fov_y, float aspect)
+{
+	if (centre.xyz.z + radius <= 0.0f) {
+		return false;
+	}
+	// Signed distance to each side plane through the eye; outside when it is more than the radius.
+	const float tan_half_fov_x = tan_half_fov_y * aspect;
+	const float dx = (fabsf(centre.xyz.x) - centre.xyz.z * tan_half_fov_x) / sqrtf(1.0f + tan_half_fov_x * tan_half_fov_x);
+	const float dy = (fabsf(centre.xyz.y) - centre.xyz.z * tan_half_fov_y) / sqrtf(1.0f + tan_half_fov_y * tan_half_fov_y);
+	return dx <= radius && dy <= radius;
 }
 
 void dof_view_z_extent(const vec3d corners[8], const vec3d& pos, const matrix& orient, const vec3d& eye_pos,
@@ -147,6 +159,10 @@ bool dof_get_frame(dof_frame* out)
 		return false;
 	}
 
+	// ponytail: an asymmetric (VR) field of view skips the frustum test; every ship counts as in view there.
+	const bool symmetric_fov = std::holds_alternative<float>(Proj_fov);
+	const float tan_half_fov_y = symmetric_fov ? tanf(std::get<float>(Proj_fov) * 0.5f) : 0.0f;
+
 	SCP_vector<dof_candidate> candidates;
 	SCP_vector<std::pair<float, float>> extents;
 	for (auto so : list_range(&Ship_obj_list)) {
@@ -157,7 +173,12 @@ bool dof_get_frame(dof_frame* out)
 		const polymodel* pm = model_get(Ship_info[Ships[o->instance].ship_info_index].model_num);
 		float zmin, zmax;
 		dof_view_z_extent(pm->bounding_box, o->pos, o->orient, Eye_position, Eye_matrix.vec.fvec, &zmin, &zmax);
-		candidates.push_back({vm_vec_dist(&o->pos, &Eye_position) - o->radius, o->radius, zmax});
+		vec3d to, view;
+		vm_vec_sub(&to, &o->pos, &Eye_position);
+		vm_vec_rotate(&view, &to, &Eye_matrix);
+		const bool in_view = !symmetric_fov || dof_sphere_in_view(view, o->radius, tan_half_fov_y, gr_screen.clip_aspect);
+		const bool cloaked = Ships[o->instance].flags[Ship::Ship_Flags::Cloaked];
+		candidates.push_back({vm_vec_dist(&o->pos, &Eye_position) - o->radius, o->radius, zmax, in_view, cloaked});
 		extents.emplace_back(zmin, zmax);
 	}
 

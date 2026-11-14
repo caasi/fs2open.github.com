@@ -137,3 +137,40 @@ TEST_F(Dof, EveryOptionRequiresOpenGL)
 	}
 	EXPECT_FALSE(mgr->getRequirement("Graphics.VSync").has_value());
 }
+
+TEST_F(Dof, PickFocusSkipsShipOutsideView)
+{
+	// The nearest capital ship is beside or behind the camera: the player cannot see it.
+	SCP_vector<dof_candidate> c = {
+		{100.0f, 500.0f, 600.0f, false},
+		{2000.0f, 500.0f, 3000.0f},
+	};
+	EXPECT_EQ(dof_pick_focus(c), 1);
+}
+
+TEST_F(Dof, PickFocusSkipsCloakedShip)
+{
+	SCP_vector<dof_candidate> c = {
+		{100.0f, 500.0f, 600.0f, true, true},
+		{2000.0f, 500.0f, 3000.0f},
+	};
+	EXPECT_EQ(dof_pick_focus(c), 1);
+}
+
+TEST_F(Dof, SphereInView)
+{
+	// 90 degree vertical field of view (tan 45 = 1), 16:9.
+	const float t = 1.0f;
+	const float aspect = 16.0f / 9.0f;
+	EXPECT_TRUE(dof_sphere_in_view(vm_vec_new(0.0f, 0.0f, 1000.0f), 10.0f, t, aspect));
+	// Behind the eye.
+	EXPECT_FALSE(dof_sphere_in_view(vm_vec_new(0.0f, 0.0f, -1000.0f), 10.0f, t, aspect));
+	// Its centre is behind the eye, but it is big enough to reach in front.
+	EXPECT_TRUE(dof_sphere_in_view(vm_vec_new(0.0f, 0.0f, -100.0f), 500.0f, t, aspect));
+	// Far to the right: the right edge is at x = 1.78 * z.
+	EXPECT_FALSE(dof_sphere_in_view(vm_vec_new(3000.0f, 0.0f, 1000.0f), 100.0f, t, aspect));
+	// Its centre is outside the right edge, but the sphere reaches in.
+	EXPECT_TRUE(dof_sphere_in_view(vm_vec_new(1900.0f, 0.0f, 1000.0f), 200.0f, t, aspect));
+	// Above the top edge (y = z): x would still be inside, so the vertical test must catch it.
+	EXPECT_FALSE(dof_sphere_in_view(vm_vec_new(0.0f, 1500.0f, 1000.0f), 100.0f, t, aspect));
+}

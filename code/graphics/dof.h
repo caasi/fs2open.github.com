@@ -18,11 +18,18 @@ struct dof_candidate {
 	float surface_dist; // distance from the eye to the ship's bounding sphere
 	float radius;
 	float zmax;         // view-space z of the far end of its bounding box
+	bool in_view = true; // its bounding sphere touches the view frustum
+	bool cloaked = false;
 };
 
 // Index of the focus ship: the nearest candidate (by surface_dist) with radius >= DOF_FOCUS_MIN_RADIUS
-// that is not wholly behind the eye. -1 when there is none.
+// that the player can see (in view, not cloaked, not wholly behind the eye). -1 when there is none.
 int dof_pick_focus(const SCP_vector<dof_candidate>& candidates);
+
+// Whether a sphere (centre in view space: x right, y up, z forward) touches the view frustum.
+// tan_half_fov_y is tan of half the vertical field of view; aspect is width / height.
+// Near and far planes are ignored.
+bool dof_sphere_in_view(const vec3d& centre, float radius, float tan_half_fov_y, float aspect);
 
 // View-space z extent (along eye_fvec) of a box given by its 8 model-space corners.
 void dof_view_z_extent(const vec3d corners[8], const vec3d& pos, const matrix& orient, const vec3d& eye_pos,
