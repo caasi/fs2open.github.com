@@ -318,6 +318,8 @@ void gr_opengl_deferred_lighting_finish()
 		return;
 	}
 
+	// False in the deferred cockpit pass, so that pass also uses the shader variant without
+	// GTAO and does not read the scene pass's AO buffer.
 	const bool gtao = gtao_enabled();
 	if (gtao) {
 		opengl_gtao_pass();
