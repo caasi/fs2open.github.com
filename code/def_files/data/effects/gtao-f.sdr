@@ -36,10 +36,22 @@ const float HALF_PI = 1.57079633;
 // The G-buffer is full resolution, this pass runs at half resolution.
 const int DOWNSCALE = 2;
 
+// deferred-clear-f.sdr writes a compressed depth of -1000000 for empty pixels. The RGBA16F
+// position buffer stores that as -65504 or -inf, and real geometry stays above it. Test the
+// raw value: after uncompress_depth_value() the empty-pixel depth depends on the mod's
+// $Max draw distance, and -inf would give inf - inf = NaN in the distance math.
+const float EMPTY_PIXEL_Z = -65504.0;
+
+bool is_empty(vec4 p)
+{
+	return p.z <= EMPTY_PIXEL_Z;
+}
+
 vec3 fetch_pos(ivec2 fullResTexel)
 {
 	vec4 p = texelFetch(PositionBuffer, fullResTexel, 0);
-	return vec3(p.xy, uncompress_depth_value(p.z));
+	// An empty pixel acts as a point at the far plane: too far to occlude anything.
+	return vec3(p.xy, is_empty(p) ? -GLOBAL_FAR_Z : uncompress_depth_value(p.z));
 }
 
 #if defined(BLUR_H) || defined(BLUR_V)
@@ -83,12 +95,11 @@ void main()
 	ivec2 full = c * DOWNSCALE;
 	ivec2 fullSize = textureSize(PositionBuffer, 0);
 
-	vec3 P = fetch_pos(full);
-	// deferred-clear writes -1000000 (compressed) for empty pixels; anything that far is sky.
-	if (-P.z >= 0.5 * GLOBAL_FAR_Z) {
+	if (is_empty(texelFetch(PositionBuffer, full, 0))) {
 		fragOut0 = vec4(1.0);
 		return;
 	}
+	vec3 P = fetch_pos(full);
 
 	vec3 N = normalize(texelFetch(NormalBuffer, full, 0).xyz);
 	vec3 V = normalize(-P);
