@@ -12,6 +12,7 @@
 
 #include "cmdline/cmdline.h"
 #include "def_files/def_files.h"
+#include "graphics/dof.h"
 #include "graphics/shader_types.h"
 #include "graphics/grinternal.h"
 #include "graphics/openxr.h"
@@ -62,6 +63,11 @@ static GLuint Smaa_output_tex               = 0;
 
 static GLuint Smaa_search_tex = 0;
 static GLuint Smaa_area_tex   = 0;
+
+static GLuint Dof_framebuffer = 0;
+static GLuint Dof_texture     = 0;
+static int Dof_texture_width  = 0;
+static int Dof_texture_height = 0;
 
 namespace ltp = lighting_profiles;
 using namespace ltp;
@@ -213,6 +219,90 @@ void opengl_post_pass_bloom()
 
 	// reset viewport, scissor test and exit
 	GL_state.ScissorTest(scissor_test);
+}
+
+static void opengl_post_process_shutdown_dof()
+{
+	if (Dof_texture) {
+		glDeleteTextures(1, &Dof_texture);
+		Dof_texture = 0;
+	}
+	if (Dof_framebuffer) {
+		glDeleteFramebuffers(1, &Dof_framebuffer);
+		Dof_framebuffer = 0;
+	}
+	Dof_texture_width = Dof_texture_height = 0;
+}
+
+// Created on first use, so a player who keeps depth of field off pays no memory for it.
+static void opengl_setup_dof_texture()
+{
+	if (Dof_texture && Dof_texture_width == Scene_texture_width && Dof_texture_height == Scene_texture_height) {
+		return;
+	}
+	opengl_post_process_shutdown_dof();
+
+	glGenFramebuffers(1, &Dof_framebuffer);
+	opengl_set_object_label(GL_FRAMEBUFFER, Dof_framebuffer, "DoF framebuffer");
+
+	glGenTextures(1, &Dof_texture);
+	GL_state.Texture.SetActiveUnit(0);
+	GL_state.Texture.SetTarget(GL_TEXTURE_2D);
+	GL_state.Texture.Enable(Dof_texture);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, Scene_texture_width, Scene_texture_height, 0, GL_RGBA, GL_FLOAT, nullptr);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+	opengl_set_object_label(GL_TEXTURE, Dof_texture, "DoF texture");
+
+	Dof_texture_width = Scene_texture_width;
+	Dof_texture_height = Scene_texture_height;
+}
+
+// Runs on the HDR scene colour before bloom, so a blurred highlight still blooms.
+static void opengl_post_pass_dof()
+{
+	graphics::dof_frame frame;
+	if (GL_rendering_to_texture || !graphics::dof_get_frame(&frame)) {
+		return;
+	}
+
+	GR_DEBUG_SCOPE("Depth of field");
+
+	opengl_setup_dof_texture();
+
+	GL_state.BindFrameBuffer(Dof_framebuffer);
+	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, Dof_texture, 0);
+	glViewport(0, 0, Scene_texture_width, Scene_texture_height);
+
+	opengl_shader_set_current(gr_opengl_maybe_create_shader(SDR_TYPE_DOF, 0));
+	Current_shader->program->Uniforms.setTextureUniform("tex", 0);
+	Current_shader->program->Uniforms.setTextureUniform("depth_tex", 1);
+	Current_shader->program->Uniforms.setTextureUniform("cockpit_depth_tex", 2);
+	GL_state.Texture.Enable(0, GL_TEXTURE_2D, Scene_color_texture);
+	GL_state.Texture.Enable(1, GL_TEXTURE_2D, Scene_depth_texture);
+	GL_state.Texture.Enable(2, GL_TEXTURE_2D, Cockpit_depth_texture);
+	opengl_set_generic_uniform_data<graphics::generic_data::dof_data>([&](graphics::generic_data::dof_data* data) {
+		data->blurStart = frame.band.start;
+		data->blurRamp = frame.band.ramp;
+		data->maxBlur = frame.max_blur;
+		data->skyBlur = frame.sky_blur;
+		data->zNear = Min_draw_distance;
+		data->zFar = Max_draw_distance;
+	});
+	opengl_draw_full_screen_textured(0.0f, 0.0f, 1.0f, 1.0f);
+
+	// Copy back, so that bloom, tonemapping and AA run unchanged on the blurred scene.
+	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, Scene_color_texture, 0);
+	opengl_shader_set_current(gr_opengl_maybe_create_shader(SDR_TYPE_COPY, 0));
+	Current_shader->program->Uniforms.setTextureUniform("tex", 0);
+	GL_state.Texture.Enable(0, GL_TEXTURE_2D, Dof_texture);
+	opengl_draw_full_screen_textured(0.0f, 0.0f, 1.0f, 1.0f);
+	// Scene_color_texture must not stay attached to a second framebuffer.
+	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, Dof_texture, 0);
+
+	glViewport(0, 0, gr_screen.max_w, gr_screen.max_h);
 }
 
 void gr_opengl_post_process_begin()
@@ -514,6 +604,8 @@ void gr_opengl_post_process_end()
 	GL_state.Texture.SetShaderMode(GL_TRUE);
 
 	GL_state.PushFramebufferState();
+
+	opengl_post_pass_dof();
 
 	// do bloom, hopefully ;)
 	opengl_post_pass_bloom();
@@ -1136,6 +1228,9 @@ size_t opengl_get_postprocessing_render_target_bytes()
 	if (Smaa_output_tex != 0) {
 		bytes += post_w * post_h * RGBA8_BYTES;
 	}
+	if (Dof_texture != 0) {
+		bytes += static_cast<size_t>(Dof_texture_width) * static_cast<size_t>(Dof_texture_height) * RGBA16F_BYTES;
+	}
 
 	return bytes;
 }
@@ -1202,6 +1297,7 @@ void opengl_post_process_shutdown()
 	graphics::Post_processing_manager = nullptr;
 
 	opengl_post_process_shutdown_bloom();
+	opengl_post_process_shutdown_dof();
 
 	Post_in_frame = false;
 	Post_active_shader_index = 0;
