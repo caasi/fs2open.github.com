@@ -272,6 +272,9 @@ static void opengl_post_pass_dof()
 
 	opengl_setup_dof_texture();
 
+	// An active clip rect would leave part of the output stale; bloom disables the scissor the same way.
+	GLboolean scissor_test = GL_state.ScissorTest(GL_FALSE);
+
 	GL_state.BindFrameBuffer(Dof_framebuffer);
 	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, Dof_texture, 0);
 	glViewport(0, 0, Scene_texture_width, Scene_texture_height);
@@ -303,6 +306,7 @@ static void opengl_post_pass_dof()
 	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, Dof_texture, 0);
 
 	glViewport(0, 0, gr_screen.max_w, gr_screen.max_h);
+	GL_state.ScissorTest(scissor_test);
 }
 
 void gr_opengl_post_process_begin()
