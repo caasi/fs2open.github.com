@@ -276,6 +276,36 @@ void ComputeEnvLight(float alpha, float ao, vec3 light_dir, vec3 eyeDir, vec3 no
 }
 #endif
 
+#ifdef GTAO
+// The AO buffer is half resolution. A bilinear fetch mixes AO across a silhouette, for example
+// from a capital ship into the edge of a fighter in front of it. So weight the 4 nearest AO
+// texels by how close their depth is to this pixel's depth (a bilateral upsample).
+float upsample_gtao(float z)
+{
+	// Texel centers at integers; gtao-f.sdr computed texel t from full-res pixel 2 * t.
+	vec2 h = gl_FragCoord.xy * 0.5 - 0.5;
+	ivec2 base = ivec2(floor(h));
+	vec2 f = h - vec2(base);
+	ivec2 size = textureSize(AOBuffer, 0);
+	float tolerance = 0.02 * abs(z) + 0.05; // the same as the GTAO blur
+
+	float sum = 0.0;
+	float wsum = 0.0;
+	for (int i = 0; i < 4; i++) {
+		ivec2 o = ivec2(i & 1, i >> 1);
+		ivec2 t = clamp(base + o, ivec2(0), size - 1);
+		float tzRaw = texelFetch(PositionBuffer, t * 2, 0).z;
+		vec2 b = mix(1.0 - f, f, vec2(o));
+		// An empty texel gets no depth weight; 1e-5 keeps wsum above 0.
+		float dz = tzRaw <= EMPTY_PIXEL_COMPRESSED_Z ? 1e9 : abs(uncompress_depth_value(tzRaw) - z);
+		float w = b.x * b.y * exp(-dz / tolerance) + 1e-5;
+		sum += texelFetch(AOBuffer, t, 0).r * w;
+		wsum += w;
+	}
+	return sum / wsum;
+}
+#endif
+
 void main()
 {
 	vec2 screenPos = gl_FragCoord.xy * vec2(invScreenWidth, invScreenHeight);
@@ -316,7 +346,9 @@ void main()
 #ifdef GTAO
 		// The baked AO map and GTAO both estimate the same occlusion, so a product would count
 		// it twice. Take the darker one, as Unity HDRP and Filament do.
-		ao = min(ao, texture(AOBuffer, screenPos).r);
+		if (position_buffer.z > EMPTY_PIXEL_COMPRESSED_Z) {
+			ao = min(ao, upsample_gtao(position.z));
+		}
 #endif
 		fragmentColor.rgb = diffuseLightColor * diffColor * ao;
 

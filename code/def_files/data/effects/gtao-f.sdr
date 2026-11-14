@@ -36,15 +36,9 @@ const float HALF_PI = 1.57079633;
 // The G-buffer is full resolution, this pass runs at half resolution.
 const int DOWNSCALE = 2;
 
-// deferred-clear-f.sdr writes a compressed depth of -1000000 for empty pixels. The RGBA16F
-// position buffer stores that as -65504 or -inf, and real geometry stays above it. Test the
-// raw value: after uncompress_depth_value() the empty-pixel depth depends on the mod's
-// $Max draw distance, and -inf would give inf - inf = NaN in the distance math.
-const float EMPTY_PIXEL_Z = -65504.0;
-
 bool is_empty(vec4 p)
 {
-	return p.z <= EMPTY_PIXEL_Z;
+	return p.z <= EMPTY_PIXEL_COMPRESSED_Z;
 }
 
 vec3 fetch_pos(ivec2 fullResTexel)
