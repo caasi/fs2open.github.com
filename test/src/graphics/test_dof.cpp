@@ -6,7 +6,15 @@
 
 using namespace graphics;
 
-TEST(Dof, PickFocusTakesNearestLargeShip)
+namespace {
+// The OptionsManager is one object for the whole process, so remove the requirements after each test.
+class Dof : public ::testing::Test {
+  protected:
+	void TearDown() override { options::OptionsManager::instance()->clearRequirements(); }
+};
+} // namespace
+
+TEST_F(Dof, PickFocusTakesNearestLargeShip)
 {
 	SCP_vector<dof_candidate> c = {
 		{50.0f, 10.0f, 100.0f},    // fighter, nearer: too small
@@ -16,13 +24,13 @@ TEST(Dof, PickFocusTakesNearestLargeShip)
 	EXPECT_EQ(dof_pick_focus(c), 2);
 }
 
-TEST(Dof, PickFocusAcceptsExactMinRadius)
+TEST_F(Dof, PickFocusAcceptsExactMinRadius)
 {
 	SCP_vector<dof_candidate> c = {{100.0f, DOF_FOCUS_MIN_RADIUS, 500.0f}};
 	EXPECT_EQ(dof_pick_focus(c), 0);
 }
 
-TEST(Dof, PickFocusSkipsShipBehindEye)
+TEST_F(Dof, PickFocusSkipsShipBehindEye)
 {
 	// A ship behind the camera would put the band at z = 0 and blur the whole screen.
 	SCP_vector<dof_candidate> c = {
@@ -32,16 +40,16 @@ TEST(Dof, PickFocusSkipsShipBehindEye)
 	EXPECT_EQ(dof_pick_focus(c), 1);
 }
 
-TEST(Dof, PickFocusNoneWhenNoLargeShip)
+TEST_F(Dof, PickFocusNoneWhenNoLargeShip)
 {
 	EXPECT_EQ(dof_pick_focus({}), -1);
 	SCP_vector<dof_candidate> c = {{10.0f, 20.0f, 100.0f}};
 	EXPECT_EQ(dof_pick_focus(c), -1);
 }
 
-TEST(Dof, ViewZExtentOfRotatedBox)
+TEST_F(Dof, ViewZExtentOfRotatedBox)
 {
-	// Unit box (half size 1 x 1 x 100) 1000 m ahead, turned 90 degrees about y:
+	// A 2 x 2 x 200 m box 1000 m ahead, then turned by a heading of 90 degrees:
 	// its long axis now lies along x, so the depth extent is only 1000 +- 1.
 	vec3d corners[8];
 	int i = 0;
@@ -67,7 +75,7 @@ TEST(Dof, ViewZExtentOfRotatedBox)
 	EXPECT_NEAR(zmax, 1001.0f, 0.01f);
 }
 
-TEST(Dof, FarBandStartAndTail)
+TEST_F(Dof, FarBandStartAndTail)
 {
 	// The spike's preferred setting: start at a third of the box, full blur at its far end.
 	auto b = dof_far_band(1000.0f, 2500.0f, 1.0f / 3.0f, 1.0f);
@@ -79,7 +87,7 @@ TEST(Dof, FarBandStartAndTail)
 	EXPECT_NEAR(b.ramp, 2000.0f, 0.01f);
 }
 
-TEST(Dof, FarBandEdgeCases)
+TEST_F(Dof, FarBandEdgeCases)
 {
 	// Start at the far end: the ramp must stay positive, the shader divides by it.
 	auto b = dof_far_band(1000.0f, 2500.0f, 1.0f, 1.0f);
@@ -95,7 +103,7 @@ TEST(Dof, FarBandEdgeCases)
 	EXPECT_GE(b.start, 1.0f);
 }
 
-TEST(Dof, ModeLogic)
+TEST_F(Dof, ModeLogic)
 {
 	EXPECT_FALSE(dof_mode_active(DofMode::Off, false));
 	EXPECT_FALSE(dof_mode_active(DofMode::Off, true));
@@ -105,7 +113,7 @@ TEST(Dof, ModeLogic)
 	EXPECT_TRUE(dof_mode_active(DofMode::Always, true));
 }
 
-TEST(Dof, OptionsExistAndDefaultOff)
+TEST_F(Dof, OptionsExistAndDefaultOff)
 {
 	auto* mgr = options::OptionsManager::instance();
 	for (const char* key : {"Graphics.DepthOfField", "Graphics.DepthOfFieldMaxBlur", "Graphics.DepthOfFieldStart",
@@ -116,7 +124,7 @@ TEST(Dof, OptionsExistAndDefaultOff)
 	EXPECT_FALSE(dof_get_frame(&f));
 }
 
-TEST(Dof, EveryOptionRequiresOpenGL)
+TEST_F(Dof, EveryOptionRequiresOpenGL)
 {
 	auto* mgr = options::OptionsManager::instance();
 	dof_set_requirements();
@@ -128,5 +136,4 @@ TEST(Dof, EveryOptionRequiresOpenGL)
 		EXPECT_FALSE(requirement->second.empty()) << key;
 	}
 	EXPECT_FALSE(mgr->getRequirement("Graphics.VSync").has_value());
-	mgr->clearRequirements();
 }
