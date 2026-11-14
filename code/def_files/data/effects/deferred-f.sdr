@@ -49,6 +49,9 @@ uniform sampler2DArray shadow_map_raw;
 uniform samplerCube sEnvmap;
 uniform samplerCube sIrrmap;
 #endif
+#ifdef GTAO
+uniform sampler2D AOBuffer; // half-res screen-space AO from gtao-f.sdr
+#endif
 #endif
 
 #ifdef VULKAN
@@ -309,6 +312,11 @@ void main()
 			ao *= traceAmbientOcclusion(shadow_tlas, worldPos, worldNormal,
 				rtaoRadius, rtaoStrength, rtaoSampleCount, rtaoBias, uint(rayCullMask), gl_FragCoord.xy);
 		}
+#endif
+#ifdef GTAO
+		// The baked AO map and GTAO both estimate the same occlusion, so a product would count
+		// it twice. Take the darker one, as Unity HDRP and Filament do.
+		ao = min(ao, texture(AOBuffer, screenPos).r);
 #endif
 		fragmentColor.rgb = diffuseLightColor * diffColor * ao;
 
