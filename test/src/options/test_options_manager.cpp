@@ -665,7 +665,8 @@ TEST_F(OptionsManagerOverride, LanguageObjectOverrideRoundTrips)
 	ASSERT_EQ(typedOpt->getValue(), expected_idx);
 }
 
-// The in-game options dialog greys out an option whose requirement the running renderer does not meet.
+// The in-game options dialog reads this record to grey out an option whose requirement the running renderer
+// does not meet. This test checks only the record; the dialog is ImGui code with no test.
 TEST_F(OptionsManagerOverride, RequirementIsQueryable)
 {
 	auto* mgr = OptionsManager::instance();
