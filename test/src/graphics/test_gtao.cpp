@@ -59,9 +59,9 @@ TEST_F(Gtao, PixelRadiusIsClamped)
 
 TEST_F(Gtao, OptionsAreRegisteredWithDefaults)
 {
-	auto quality = typed_option<int>("Graphics.AmbientOcclusion");
-	auto radius = typed_option<float>("Graphics.AmbientOcclusionRadius");
-	auto intensity = typed_option<float>("Graphics.AmbientOcclusionIntensity");
+	auto quality = typed_option<int>("Graphics.SsaoQuality");
+	auto radius = typed_option<float>("Graphics.SsaoRadius");
+	auto intensity = typed_option<float>("Graphics.SsaoIntensity");
 	ASSERT_NE(quality, nullptr);
 	ASSERT_NE(radius, nullptr);
 	ASSERT_NE(intensity, nullptr);
@@ -78,7 +78,7 @@ TEST_F(Gtao, OptionsAreGreyedOutOnVulkanOnly)
 	gtao_set_option_requirements();
 
 	auto* mgr = OptionsManager::instance();
-	for (auto key : {"Graphics.AmbientOcclusion", "Graphics.AmbientOcclusionRadius", "Graphics.AmbientOcclusionIntensity"}) {
+	for (auto key : {"Graphics.SsaoQuality", "Graphics.SsaoRadius", "Graphics.SsaoIntensity"}) {
 		auto requirement = mgr->getRequirement(key);
 		ASSERT_TRUE(requirement.has_value()) << key;
 		EXPECT_FALSE(gr_option_requirement_met(requirement->first, GraphicsAPI::Vulkan)) << key;

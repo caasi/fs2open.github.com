@@ -8,11 +8,11 @@
 // variant) darkens only the ambient term with it. The Vulkan renderer does not have
 // this pass; there it has RTAO instead (graphics/rtao.h).
 
-// 0 = Off, 1 = Low, 2 = Medium, 3 = High. Bound to Graphics.AmbientOcclusion.
+// 0 = Off, 1 = Low, 2 = Medium, 3 = High. Bound to Graphics.SsaoQuality.
 extern int Gtao_quality;
-// Multiplier on the default sample radius. Bound to Graphics.AmbientOcclusionRadius.
+// Multiplier on the default sample radius. Bound to Graphics.SsaoRadius.
 extern float Gtao_radius_scale;
-// Exponent on the visibility, so a larger value gives darker AO. Bound to Graphics.AmbientOcclusionIntensity.
+// Exponent on the visibility, so a larger value gives darker AO. Bound to Graphics.SsaoIntensity.
 extern float Gtao_intensity;
 
 struct gtao_sample_counts {

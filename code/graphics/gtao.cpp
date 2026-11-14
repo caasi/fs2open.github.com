@@ -12,9 +12,9 @@ float Gtao_radius_scale = 1.0f;
 float Gtao_intensity = 1.5f;
 
 // coverity[GLOBAL_INIT_ORDER] -- safe; OptionBuilder::finish() uses Meyers singleton
-static auto GtaoQualityOption __UNUSED = options::OptionBuilder<int>("Graphics.AmbientOcclusion",
+static auto GtaoQualityOption __UNUSED = options::OptionBuilder<int>("Graphics.SsaoQuality",
                      std::pair<const char*, int>{"Screen-Space Ambient Occlusion", -1},
-                     std::pair<const char*, int>{"Darkens the ambient light in creases and gaps of ships. OpenGL renderer with deferred lighting only", -1})
+                     std::pair<const char*, int>{"Darkens the ambient light in creases and gaps of ships, from what is on screen. OpenGL renderer with deferred lighting only; the Vulkan renderer offers Raytraced Ambient Occlusion instead, on ray tracing hardware", -1})
                      .values({{0, {"Off", -1}}, {1, {"Low", -1}}, {2, {"Medium", -1}}, {3, {"High", -1}}})
                      .bind_to(&Gtao_quality)
                      .flags({options::OptionFlags::ForceMultiValueSelection})
@@ -25,8 +25,8 @@ static auto GtaoQualityOption __UNUSED = options::OptionBuilder<int>("Graphics.A
                      .finish();
 
 // coverity[GLOBAL_INIT_ORDER] -- safe; OptionBuilder::finish() uses Meyers singleton
-static auto GtaoRadiusOption __UNUSED = options::OptionBuilder<float>("Graphics.AmbientOcclusionRadius",
-                     std::pair<const char*, int>{"Ambient Occlusion Radius", -1},
+static auto GtaoRadiusOption __UNUSED = options::OptionBuilder<float>("Graphics.SsaoRadius",
+                     std::pair<const char*, int>{"Screen-Space Ambient Occlusion Radius", -1},
                      std::pair<const char*, int>{"Multiplier on the size of the area that screen-space ambient occlusion looks at", -1})
                      .range(0.25f, 3.0f)
                      .bind_to(&Gtao_radius_scale)
@@ -37,8 +37,8 @@ static auto GtaoRadiusOption __UNUSED = options::OptionBuilder<float>("Graphics.
                      .finish();
 
 // coverity[GLOBAL_INIT_ORDER] -- safe; OptionBuilder::finish() uses Meyers singleton
-static auto GtaoIntensityOption __UNUSED = options::OptionBuilder<float>("Graphics.AmbientOcclusionIntensity",
-                     std::pair<const char*, int>{"Ambient Occlusion Intensity", -1},
+static auto GtaoIntensityOption __UNUSED = options::OptionBuilder<float>("Graphics.SsaoIntensity",
+                     std::pair<const char*, int>{"Screen-Space Ambient Occlusion Intensity", -1},
                      std::pair<const char*, int>{"How dark screen-space ambient occlusion makes the ambient light", -1})
                      .range(0.5f, 4.0f)
                      .bind_to(&Gtao_intensity)
@@ -100,7 +100,7 @@ void gtao_set_option_requirements()
 {
 	auto* mgr = options::OptionsManager::instance();
 	const SCP_string explanation = XSTR("Only the OpenGL renderer has screen-space ambient occlusion.", -1);
-	for (auto key : {"Graphics.AmbientOcclusion", "Graphics.AmbientOcclusionRadius", "Graphics.AmbientOcclusionIntensity"}) {
+	for (auto key : {"Graphics.SsaoQuality", "Graphics.SsaoRadius", "Graphics.SsaoIntensity"}) {
 		mgr->setRequirement(key, Gtao_requirement, explanation);
 	}
 }
