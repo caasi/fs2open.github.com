@@ -124,8 +124,10 @@ TEST_F(Dof, OptionsExistAndDefaultOff)
 			 "Graphics.DepthOfFieldTail", "Graphics.DepthOfFieldSky", "Graphics.DepthOfFieldQuality"}) {
 		EXPECT_NE(mgr->getOptionByKey(key), nullptr) << key;
 	}
-	dof_frame f;
-	EXPECT_FALSE(dof_get_frame(&f));
+	// Off by default, so the default render does not change. "0" is the serialized DofMode::Off.
+	auto* mode = mgr->getOptionByKey("Graphics.DepthOfField");
+	ASSERT_NE(mode, nullptr);
+	EXPECT_EQ(mode->getCurrentValueDescription().serialized, "0");
 }
 
 TEST_F(Dof, EveryOptionRequiresOpenGL)
