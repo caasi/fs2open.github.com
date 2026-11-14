@@ -18,7 +18,7 @@ layout(std140) uniform genericData {
 	float blurStart; // view z (metres) where the blur starts
 	float blurRamp;  // metres from blurStart to maxBlur
 	float maxBlur;   // circle of confusion (CoC) clamp in pixels
-	float skyBlur;   // scale of the CoC of pixels with no depth (stars, background)
+	float skyBlur;   // CoC of pixels with no depth (stars, background), as a part of maxBlur
 
 	float zNear;
 	float zFar;
@@ -41,8 +41,11 @@ float coc_of(vec2 suv)
 		return 0.0;
 	}
 	float d = texture(depth_tex, suv).x;
-	float c = clamp((linear_z(d) - blurStart) / blurRamp, 0.0, 1.0) * maxBlur;
-	return d >= 1.0 ? c * skyBlur : c;
+	// The sky has no depth: its blur is set on its own, not by where it falls on the ramp.
+	if (d >= 1.0) {
+		return maxBlur * skyBlur;
+	}
+	return clamp((linear_z(d) - blurStart) / blurRamp, 0.0, 1.0) * maxBlur;
 }
 
 // Colour and depth must come from the same texel. Bilinear colour next to nearest depth
