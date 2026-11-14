@@ -282,8 +282,9 @@ void ComputeEnvLight(float alpha, float ao, vec3 light_dir, vec3 eyeDir, vec3 no
 // texels by how close their depth is to this pixel's depth (a bilateral upsample).
 float upsample_gtao(float z)
 {
-	// Texel centers at integers; gtao-f.sdr computed texel t from full-res pixel 2 * t.
-	vec2 h = gl_FragCoord.xy * 0.5 - 0.5;
+	// gtao-f.sdr computed AO texel t at full-res pixel 2 * t, whose center is at
+	// gl_FragCoord 2 * t + 0.5. So h = (gl_FragCoord - 0.5) / 2 puts AO texel t at integer t.
+	vec2 h = gl_FragCoord.xy * 0.5 - 0.25;
 	ivec2 base = ivec2(floor(h));
 	vec2 f = h - vec2(base);
 	ivec2 size = textureSize(AOBuffer, 0);
