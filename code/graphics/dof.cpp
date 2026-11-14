@@ -182,7 +182,7 @@ bool dof_get_frame(dof_frame* out)
 		return false;
 	}
 
-	// ponytail: an asymmetric (VR) field of view skips the frustum test; every ship counts as in view there.
+	// Limit: with an asymmetric (VR) field of view the in-view test is skipped, so every ship counts as in view.
 	const bool symmetric_fov = std::holds_alternative<float>(Proj_fov);
 	const float tan_half_fov_y = symmetric_fov ? tanf(std::get<float>(Proj_fov) * 0.5f) : 0.0f;
 
