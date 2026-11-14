@@ -134,10 +134,12 @@ void main()
 			vec3 d1 = S1 - P;
 			float dist0 = length(d0);
 			float dist1 = length(d1);
-			float w0 = clamp(dist0 * falloffMul + falloffAdd, 0.0, 1.0);
-			float w1 = clamp(dist1 * falloffMul + falloffAdd, 0.0, 1.0);
-			float shc0 = mix(lowHorizonCos0, dot(d0 / dist0, V), w0);
-			float shc1 = mix(lowHorizonCos1, dot(d1 / dist1, V), w1);
+			// At the screen edge the clamp can return the center texel itself (dist = 0).
+			// Give such a sample no weight, and keep the division away from 0/0 = NaN.
+			float w0 = dist0 > 1e-4 ? clamp(dist0 * falloffMul + falloffAdd, 0.0, 1.0) : 0.0;
+			float w1 = dist1 > 1e-4 ? clamp(dist1 * falloffMul + falloffAdd, 0.0, 1.0) : 0.0;
+			float shc0 = mix(lowHorizonCos0, dot(d0 / max(dist0, 1e-4), V), w0);
+			float shc1 = mix(lowHorizonCos1, dot(d1 / max(dist1, 1e-4), V), w1);
 			horizonCos0 = max(horizonCos0, shc0);
 			horizonCos1 = max(horizonCos1, shc1);
 		}
