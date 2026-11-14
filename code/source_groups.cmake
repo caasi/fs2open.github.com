@@ -460,6 +460,8 @@ add_file_folder("Graphics"
 	graphics/debug_sphere.h
 	graphics/color.cpp
 	graphics/color.h
+	graphics/dof.cpp
+	graphics/dof.h
 	graphics/grbatch.cpp
 	graphics/grbatch.h
 	graphics/grinternal.cpp
