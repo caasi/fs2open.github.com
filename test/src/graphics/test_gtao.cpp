@@ -37,9 +37,9 @@ TEST_F(Gtao, QualityLevelsSetSliceAndStepCounts)
 	EXPECT_EQ(gtao_samples(-1).slices, 0);
 }
 
-TEST_F(Gtao, PixelRadiusDoesNotDependOnDistance)
+TEST_F(Gtao, PixelRadiusFormula)
 {
-	// proj11 = 2 and 720 lines: 0.03 * 2 * 360 = 21.6 px at any depth
+	// proj11 = 2 and 720 lines: 0.03 * 2 * 360 = 21.6 px
 	EXPECT_FLOAT_EQ(gtao_pixel_radius(1.0f, 2.0f, 720), 21.6f);
 	EXPECT_FLOAT_EQ(gtao_pixel_radius(2.0f, 2.0f, 720), 43.2f);
 }
