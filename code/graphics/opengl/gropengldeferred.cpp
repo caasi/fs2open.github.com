@@ -41,6 +41,12 @@ static GLuint Gtao_textures[2] = {0, 0};
 static int Gtao_width = 0;
 static int Gtao_height = 0;
 
+size_t opengl_get_deferred_render_target_bytes()
+{
+	// Two GL_R8 textures (1 byte per pixel), made at the first frame with GTAO
+	return Gtao_framebuffer != 0 ? 2 * static_cast<size_t>(Gtao_width) * static_cast<size_t>(Gtao_height) : 0;
+}
+
 void gr_opengl_deferred_shutdown()
 {
 	if (Gtao_framebuffer != 0) {
