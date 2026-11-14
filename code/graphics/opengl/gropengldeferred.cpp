@@ -267,6 +267,8 @@ static void opengl_gtao_pass()
 	// (the clip rectangle), so give it back unchanged.
 	GLint viewport[4];
 	glGetIntegerv(GL_VIEWPORT, viewport);
+	// An active clip rect would leave part of the AO buffer stale; bloom and DoF disable the scissor the same way.
+	GLboolean scissor_test = GL_state.ScissorTest(GL_FALSE);
 
 	GL_state.BindFrameBuffer(Gtao_framebuffer);
 	glViewport(0, 0, Gtao_width, Gtao_height);
@@ -311,6 +313,7 @@ static void opengl_gtao_pass()
 
 	GL_state.BindFrameBuffer(Scene_framebuffer);
 	glViewport(viewport[0], viewport[1], viewport[2], viewport[3]);
+	GL_state.ScissorTest(scissor_test);
 	GL_state.ColorMask(true, true, true, false);
 }
 
