@@ -24,7 +24,11 @@ layout(std140) uniform genericData {
 	int sliceCount;
 
 	int stepCount;        // per side of each slice
-	float pad[3];
+	// Three scalars, not an array: std140 gives each array element 16 bytes,
+	// which would not match gtao_data in uniform_structs.h.
+	float pad0;
+	float pad1;
+	float pad2;
 };
 
 const float PI = 3.14159265;
