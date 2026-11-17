@@ -528,7 +528,6 @@ class VulkanRenderer {
 	SCP_vector<vk::UniqueImageView> m_compositionImageViews;
 	SCP_vector<VulkanAllocation> m_compositionAllocations;
 	vk::UniqueSampler m_compositionSampler;
-	vk::UniqueSampler m_compositionSamplerLinear;
 	SCP_vector<vk::UniqueFramebuffer> m_encodeFramebuffers;
 	vk::UniqueRenderPass m_encodeRenderPass;
 
