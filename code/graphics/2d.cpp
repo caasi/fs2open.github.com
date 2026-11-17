@@ -1218,7 +1218,7 @@ static const SCP_vector<std::pair<int, std::pair<const char*, int>>> UpscaleFilt
 // coverity[GLOBAL_INIT_ORDER] -- safe; OptionBuilder::finish() uses Meyers singleton
 static auto UpscaleFilterOption __UNUSED = options::OptionBuilder<int>("Graphics.UpscaleFilter",
                      std::pair<const char*, int>{"Upscale Filter", -1},
-                     std::pair<const char*, int>{"How the frame is scaled up when the window is larger than the render resolution. Nearest keeps square pixels, for a low-resolution look.", -1})
+                     std::pair<const char*, int>{"OpenGL only. How the frame is scaled to the window when the window size differs from the render resolution. Nearest keeps sharp pixels, square at whole-number scales. Vulkan always uses nearest. VR output does not change.", -1})
                      .category(std::make_pair("Graphics", 1825))
                      .level(options::ExpertLevel::Advanced)
                      .values(UpscaleFilterValues)

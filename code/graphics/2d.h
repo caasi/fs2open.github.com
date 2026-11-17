@@ -97,7 +97,7 @@ float gr_anisotropy_setting();
 
 int gr_texture_filter_setting();
 
-// true when the final scale-up to the window uses nearest filtering (Graphics.UpscaleFilter)
+// true when OpenGL scales the final frame to the window with nearest filtering (Graphics.UpscaleFilter)
 bool gr_upscale_nearest();
 
 extern bool Gr_post_processing_enabled;
