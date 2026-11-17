@@ -87,6 +87,9 @@ void VulkanRenderer::createCompositionResources()
 		sampInfo.addressModeV = vk::SamplerAddressMode::eClampToEdge;
 		sampInfo.addressModeW = vk::SamplerAddressMode::eClampToEdge;
 		m_compositionSampler = m_device->createSamplerUnique(sampInfo);
+		sampInfo.magFilter = vk::Filter::eLinear;
+		sampInfo.minFilter = vk::Filter::eLinear;
+		m_compositionSamplerLinear = m_device->createSamplerUnique(sampInfo);
 	}
 }
 
@@ -197,6 +200,7 @@ void VulkanRenderer::encodeToSwapChain()
 	}
 
 	const float gamma = Cmdline_no_set_gamma ? 1.0f : Gr_gamma;
+	const vk::Sampler compositionSampler = gr_upscale_nearest() ? m_compositionSampler.get() : m_compositionSamplerLinear.get();
 
 	// HDR10: PQ/BT.2020 encode plus the user gamma slider, must run as a
 	// shader (encodeOutput()).
@@ -207,7 +211,7 @@ void VulkanRenderer::encodeToSwapChain()
 			m_encodeFramebuffers[m_currentSwapChainImage].get(),
 			m_swapChainExtent,
 			m_compositionImageViews[m_currentSwapChainImage].get(),
-			m_compositionSampler.get(),
+			compositionSampler,
 			Gr_hdr_paperwhite_nits,
 			Gr_hdr_peak_nits,
 			gamma);
@@ -225,7 +229,7 @@ void VulkanRenderer::encodeToSwapChain()
 		m_encodeFramebuffers[m_currentSwapChainImage].get(),
 		m_swapChainExtent,
 		m_compositionImageViews[m_currentSwapChainImage].get(),
-		m_compositionSampler.get(),
+		compositionSampler,
 		gamma);
 }
 vk::Format VulkanRenderer::findDepthFormat()

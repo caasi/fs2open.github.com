@@ -1210,6 +1210,27 @@ float gr_anisotropy_setting()
 	return anisotropic_default();
 }
 
+static const SCP_vector<std::pair<int, std::pair<const char*, int>>> UpscaleFilterValues = {{0, {"Linear", -1}},
+                                                                                           {1, {"Nearest", -1}}};
+
+// coverity[GLOBAL_INIT_ORDER] -- safe; OptionBuilder::finish() uses Meyers singleton
+static auto UpscaleFilterOption = options::OptionBuilder<int>("Graphics.UpscaleFilter",
+                     std::pair<const char*, int>{"Upscale Filter", -1},
+                     std::pair<const char*, int>{"How the frame is scaled up when the window is larger than the render resolution. Nearest keeps square pixels, for a low-resolution look.", -1})
+                     .category(std::make_pair("Graphics", 1825))
+                     .level(options::ExpertLevel::Advanced)
+                     .values(UpscaleFilterValues)
+                     .default_val(0)
+                     .flags({options::OptionFlags::ForceMultiValueSelection})
+                     .importance(0)
+                     .finish();
+
+bool gr_upscale_nearest()
+{
+	// read live: qtFRED sets an override and never loads initial values
+	return Using_in_game_options && UpscaleFilterOption->getValue() == 1;
+}
+
 // trilinear, which the launcher setting has always defaulted to
 static int Texture_filter = 1;
 

@@ -613,6 +613,28 @@ TEST_F(TextureFilterSetting, OverrideBeatsAnEnforcedModValue)
 	ASSERT_EQ(filter, 1);
 }
 
+TEST_F(OptionsManagerOverride, UpscaleFilterDefaultsToLinear)
+{
+	const bool saved = Using_in_game_options;
+	Using_in_game_options = true;
+	const bool nearest = gr_upscale_nearest();
+	Using_in_game_options = saved;
+	ASSERT_FALSE(nearest);
+}
+
+TEST_F(OptionsManagerOverride, UpscaleFilterNearestOverrideIsReadLive)
+{
+	const bool saved = Using_in_game_options;
+	Using_in_game_options = true;
+	OptionsManager::instance()->setOverride("Graphics.UpscaleFilter", std::unique_ptr<json_t>(json_integer(1)), "test");
+	const bool nearest = gr_upscale_nearest();
+	Using_in_game_options = false;
+	const bool without_ingame = gr_upscale_nearest();
+	Using_in_game_options = saved;
+	ASSERT_TRUE(nearest);
+	ASSERT_FALSE(without_ingame);
+}
+
 TEST_F(OptionsManagerOverride, LanguageObjectOverrideRoundTrips)
 {
 	auto* opt = OptionsManager::instance()->getOptionByKey("Game.Language");
