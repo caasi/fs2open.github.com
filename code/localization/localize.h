@@ -79,6 +79,13 @@ int lcl_find_lang_index_by_name(const SCP_string& lang);
 // (translated, untranslated, and hybrid: internal translated, external untranslated)
 int lcl_get_current_lang_index();
 
+// values of the voice language besides an index into Lcl_languages
+#define LCL_VOICE_ORIGINAL				-1		// the voice files as named, not from a language subfolder
+#define LCL_VOICE_TEXT_LANGUAGE			-2		// the voice files of the text language (the default)
+
+// get the index of the language whose voice files are used, or LCL_VOICE_ORIGINAL for the files as named
+int lcl_get_voice_lang_index();
+
 // initialize localization, if no language is passed - use the language specified in the registry
 void lcl_init(int lang = -1);
 
@@ -108,6 +115,7 @@ ubyte lcl_get_font_index(int font_num);
 // maybe add localized directory to full path with file name when opening a localized file
 int lcl_add_dir_to_path_with_filename(char *current_path, size_t path_max);
 int lcl_add_dir_to_path_with_filename(SCP_string &current_path);
+int lcl_add_dir_to_path_with_filename(SCP_string &current_path, int lang);
 
 // Goober5000
 void lcl_replace_stuff(char *text, size_t max_len, bool force = false);
