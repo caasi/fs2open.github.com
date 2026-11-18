@@ -844,7 +844,7 @@ int message_play_training_voice(int index)
 	if (!Message_waves[index].num.isValid()) {
 		// even though we localize the filename here, if we use the audiostream branch, we pass the original filename;
 		// because audiostream_open() performs its own localization
-		auto localized = cf_localize_filename(Message_waves[index].name, CF_TYPE_ANY, NUM_AUDIO_EXT, audio_ext_list);
+		auto localized = cf_localize_voice_filename(Message_waves[index].name, CF_TYPE_ANY, NUM_AUDIO_EXT, audio_ext_list);
 
 		// check the size of the localized file: large files get streamed, small files get played as sounds
 		auto res = cf_find_file_location_ext(localized.c_str(), NUM_AUDIO_EXT, audio_ext_list, CF_TYPE_ANY);

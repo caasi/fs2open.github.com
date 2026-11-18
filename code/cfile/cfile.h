@@ -425,6 +425,9 @@ CFileLocationExt cf_find_file_location_ext(const char* filename, const int ext_n
 // the language folder goes directly before the filename, so for a bare name it must be directly inside the path type's folder
 SCP_string cf_localize_filename(const char* filename, int pathtype, int num_ext = 0, const char** ext_list = nullptr);
 
+// like cf_localize_filename(), but in the voice language, which the player can set apart from the text language
+SCP_string cf_localize_voice_filename(const char* filename, int pathtype, int num_ext, const char** ext_list);
+
 // Functions to change directories
 int cfile_chdir(const char *dir);
 

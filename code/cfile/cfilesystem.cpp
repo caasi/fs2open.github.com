@@ -1684,16 +1684,15 @@ CFileLocationExt cf_find_file_location_ext(const char *filename, const int ext_n
 	return CFileLocationExt();
 }
 
-SCP_string cf_localize_filename(const char *filename, int pathtype, int num_ext, const char **ext_list)
+static SCP_string cf_localize_filename_in(const char *filename, int lang, int pathtype, int num_ext, const char **ext_list)
 {
 	Assertion(filename != nullptr, "filename must not be null!");
 
-	int lang = lcl_get_current_lang_index();
 	if (!Lcl_languages.in_bounds(lang) || Lcl_languages[lang].lang_ext[0] == '\0')
 		return filename;
 
 	SCP_string localized = filename;
-	lcl_add_dir_to_path_with_filename(localized);
+	lcl_add_dir_to_path_with_filename(localized, lang);
 
 	// cf_find_file_location_ext() and the sound code's buffers are limited to MAX_FILENAME_LEN
 	if (localized.length() >= MAX_FILENAME_LEN)
@@ -1709,6 +1708,16 @@ SCP_string cf_localize_filename(const char *filename, int pathtype, int num_ext,
 		found = cf_find_file_location(localized.c_str(), pathtype).found;
 
 	return found ? localized : SCP_string(filename);
+}
+
+SCP_string cf_localize_filename(const char *filename, int pathtype, int num_ext, const char **ext_list)
+{
+	return cf_localize_filename_in(filename, lcl_get_current_lang_index(), pathtype, num_ext, ext_list);
+}
+
+SCP_string cf_localize_voice_filename(const char *filename, int pathtype, int num_ext, const char **ext_list)
+{
+	return cf_localize_filename_in(filename, lcl_get_voice_lang_index(), pathtype, num_ext, ext_list);
 }
 
 
